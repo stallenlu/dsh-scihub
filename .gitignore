@@ -1,0 +1,5 @@
+node_modules/
+/scihub/
+*.log
+.DS_Store
+Thumbs.db

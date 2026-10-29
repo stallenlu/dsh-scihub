@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Sci-Hub PDF Fetcher",
+    "description": "Adds the scihub_pdf tool: takes a DOI or an article/PDF URL, resolves it through Sci-Hub mirrors, downloads the paper and saves it into the session workspace."
+  }
+}

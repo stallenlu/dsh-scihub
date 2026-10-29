@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Sci-Hub PDF fetcher">
+  <rect x="3" y="3" width="58" height="58" rx="13" fill="#1f2937"/>
+  <path d="M20 13h18l9 9v12" fill="none" stroke="#e5e7eb" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M38 13v9h9" fill="none" stroke="#e5e7eb" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M38 51V35m0 16-7-7m7 7 7-7" fill="none" stroke="#38bdf8" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M24 41h-4v10h4" fill="none" stroke="#94a3b8" stroke-width="2.6" stroke-linecap="round"/>
+</svg>

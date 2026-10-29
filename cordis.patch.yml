@@ -1,0 +1,4 @@
+# dsh bundle patch: inserts the Sci-Hub PDF fetcher into a profile's layer stack.
+- insert:
+    - id: scihub
+      name: 'dsh-scihub'

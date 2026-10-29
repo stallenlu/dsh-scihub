@@ -1,0 +1,40 @@
+{
+  "name": "dsh-scihub",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "Sci-Hub PDF fetcher for DeepSeek Harness: the scihub_pdf model tool resolves a DOI or an article URL, downloads the paper PDF and saves it into the session workspace.",
+  "exports": {
+    ".": "./lib/host.mjs",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "probe-mirrors.mjs",
+    "test-smoke.mjs"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "cordis",
+    "scihub",
+    "doi",
+    "pdf"
+  ],
+  "license": "MIT"
+}
