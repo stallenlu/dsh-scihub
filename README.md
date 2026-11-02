@@ -6,7 +6,9 @@ DeepSeek Harness 插件：按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF
 
 ## 提供的能力
 
-注册一个模型工具 `scihub_pdf`：
+注册两个模型工具：
+
+### `scihub_pdf` — 单篇
 
 | 参数 | 类型 | 说明 |
 |---|---|---|
@@ -14,6 +16,22 @@ DeepSeek Harness 插件：按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF
 | `url` | string | 文章页 / 出版社 DOI 链接 / 直接 PDF 链接 |
 
 `doi` 与 `url` **二选一**，同时给或都不给都会在入口报错。
+
+### `scihub_batch` — 批量
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `dois` | string[] | 裸 DOI 列表，最多 50 条 |
+
+逐条走和 `scihub_pdf` 完全一样的镜像流程，返回一个汇总：
+
+| status | 含义 |
+|---|---|
+| `downloaded` | 全部命中 |
+| `partial` | 部分命中，`results` 里逐条给出状态 |
+| `failed` | 一条都没命中 |
+
+`counts` 给出 `{total, downloaded, failed}`，`results` 里每条带自己的 `status` / `path` / `mirror` / `attempts`。
 
 ### `url` 怎么解析
 
@@ -23,7 +41,7 @@ DeepSeek Harness 插件：按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF
 
 第 3 条只多花一次抓取，但能覆盖 Nature/Science 这类 URL 里不含 DOI 的站点。
 
-### 返回的 `status`
+### 返回的 `status`（`scihub_pdf`）
 
 | status | 含义 |
 |---|---|
@@ -32,18 +50,53 @@ DeepSeek Harness 插件：按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF
 | `challenge` | 至少一个镜像返回 Cloudflare Turnstile 人机验证；纯 HTTP 客户端过不去，**无法确认文章是否存在**，所以不能报 not_found |
 | `error` | 网络 / HTTP / 拿回来的不是 PDF，`message` 与 `attempts` 里写原因 |
 
+## 镜像列表：一键更新
+
+镜像存活是今天的快照，不是永久事实。列表是**数据**，不在代码里：
+
+- 运行时真源是 `lib/mirrors.json`：`{"updatedAt": "...", "mirrors": [...]}`。
+- 每次调用都**重新读**这个文件 → 改完立即生效，**不需要重启 DSH**。
+
+一键重测并写回：
+
+```bash
+node update-mirrors.mjs                          # 用默认 DOI 10.1038/nature12373 探全部候选
+node update-mirrors.mjs --doi 10.1103/PhysRevLett.116.061102
+```
+
+脚本对每个候选域名真抓一次文章页、找出内嵌的 PDF 链接、**真下载并校验 `%PDF-` 魔数**，通过的按响应速度排序写回 `lib/mirrors.json`，并打印 before/after 差异。一个都探不到活的就保留原列表并以非零码退出。
+
+### 用配置覆盖
+
+在 profile 的 `cordis.patch.yml` 里给插件加 `config:`：
+
+```yaml
+- id: scihub
+  name: 'dsh-scihub'
+  config:
+    mirrors:
+      - https://sci-hub.ee
+      - https://sci-hub.ren
+```
+
+```yaml
+    mirrorFile: C:/Users/me/sci-hub-mirrors.json   # 指向别的 { "mirrors": [...] } 文件
+```
+
+优先级：`config.mirrors` > `config.mirrorFile` > `lib/mirrors.json`。
+
 ## 实现要点
 
-- 镜像列表（2026-10-29 实测，24 个候选域名逐个验证到真能吐出 `%PDF`）：`sci-hub.usualwant.com` → `sci-hub.ee` → `sci-hub.in` → `sci-hub.ren`。
 - 上一次成功的镜像会被提到最前面，所以列表里哪天死一个，只会在第一次请求时白跑一趟，之后不再付这个代价。
-- `sci-hub.jp`（最初指定的域名）已确认是停放站：任何路径都返回 610 字节纯广告壳，**已从列表移除**。
+- `sci-hub.jp`（最初指定的域名）已确认是停放站：任何路径都返回 610 字节纯广告壳，**不在列表里**。
 - 其余候选的死法：`.se .ink .io .work .tech .3800808.xyz .nsm.plus` 无 DNS；`.st .box .mksa.top` 是 DDoS-Guard 403；`.wf` 503；`.ru` 是 Cloudflare「are you a robot」；`.tf` 404、`.cat` 501、`.pub .help .li .tw` 超时/重置；`.ist` 同为停放壳。
-- 文章页的 PDF 链接来自 `<embed id="pdf" src="...">`；页面「save」按钮里那份 JSON 转义的同一链接（`\/`）也会被解析。
+- 文章页的 PDF 链接来自 `<embed id="pdf" src="...">`；页面「save」按钮里那份 JSON 转义的同一链接（`\\/`）也会被解析。
 - 下载后校验 `%PDF-` 魔数；命中 HTML 广告页或验证页一律判失败，不落盘。
+- 用 `node:https` 而不是 `fetch`：Sci-Hub 的 PDF CDN（`sci.bban.top`）对 `fetch()` 会 abort/超时，`node:https` 正常返回 PDF。
 - 只依赖 `node:` 内置模块（`node:https` / `node:http` / `node:fs/promises` / `node:path`），无第三方依赖。
+- `Config` 是自写的 Standard Schema 实现：本包不在 profile 的 node_modules 树里，`import '@deepseek-ai/schemastery'` 会直接 `ERR_MODULE_NOT_FOUND`，所以手写一份保持零依赖。
 - 输出目录通过 `workingDirectory` 服务解析，取不到时退到该服务的默认目录。
 - 文件名：走 DOI 时用 `<doi 压平>.pdf`，直连时用 URL 最后一段。
-- 镜像存活是今天的快照；下载开始失败时跑 `node probe-mirrors.mjs` 重测，把结果贴回 `MIRRORS`。
 
 ## 安装
 
@@ -60,7 +113,7 @@ plugin_manager install_bundle target=<本目录绝对路径>
       name: 'dsh-scihub'
 ```
 
-改了 `lib/host.mjs` 之后需要重启 DSH：profile 里的插件模块按「一次加载」的模块代存在，不是改文件即刻生效。
+改了 `lib/host.mjs` 之后需要重启 DSH：profile 里的插件模块按「一次加载」的模块代存在，不是改文件即刻生效。**但改 `lib/mirrors.json` 不需要重启** —— 它是运行时读的。
 
 ## 自测
 
@@ -69,11 +122,13 @@ node test-smoke.mjs                          # 默认 10.1038/nature12373
 node test-smoke.mjs 10.1103/PhysRevLett.116.061102
 ```
 
-一条最小端到端检查，覆盖五种输入与五种非法输入：
+一条最小端到端检查，覆盖五种输入、五种非法输入，以及批量模式：
 
 - `doi`（doi.org 链接，须归一化成裸 DOI）
 - `url` 自带 DOI
 - `url` 是直连 `.pdf`
 - `url` 是文章页，DOI 只在 `citation_doi` meta 里（本地起 HTTP 服务模拟，离线确定性）
 - `.pdf` 链接却返回 HTML → 必须报 `error`，不能算下载成功
+- 批量：3 条 DOI（2 真实 + 1 不存在）→ `partial`，`counts` 与逐条 `results` 正确
+- 批量：空列表 → 入口拒绝
 - 两参数同时给 / 都不给 / 非法 DOI / `ftp://` / 非 URL → 全部在入口拒绝

@@ -1,9 +1,9 @@
 {
   "name": "dsh-scihub",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
-  "description": "Sci-Hub PDF fetcher for DeepSeek Harness: the scihub_pdf model tool resolves a DOI or an article URL, downloads the paper PDF and saves it into the session workspace.",
+  "description": "Sci-Hub PDF fetcher for DeepSeek Harness: the scihub_pdf / scihub_batch model tools resolve DOIs or article URLs through Sci-Hub mirrors, download the paper PDFs and save them into the session workspace.",
   "exports": {
     ".": "./lib/host.mjs",
     "./locale/*.json": "./locale/*.json",
@@ -21,7 +21,7 @@
     "locale/*.json",
     "icon.svg",
     "README.md",
-    "probe-mirrors.mjs",
+    "update-mirrors.mjs",
     "test-smoke.mjs"
   ],
   "engines": {

@@ -1,5 +1,5 @@
 /**
- * One minimal end-to-end check: register the tool through a fake Cordis
+ * One minimal end-to-end check: register the tools through a fake Cordis
  * context, then drive every input mode and assert the bytes on disk.
  *
  *   node test-smoke.mjs            # uses 10.1038/nature12373
@@ -15,32 +15,47 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
 
-import { apply, inject } from './lib/host.mjs';
+import { apply, Config, inject } from './lib/host.mjs';
 
 assert.deepEqual(inject, ['tools'], 'plugin must inject the tools service');
+
+// The Standard Schema contract Cordis reads at load time.
+assert.ok(Config['~standard'], 'Config must expose ~standard');
+assert.equal(Config['~standard'].vendor, 'dsh-scihub');
+assert.deepEqual(Config['~standard'].validate({}).value, { mirrors: [], mirrorFile: '' });
 
 // ── fake Cordis context ─────────────────────────────────────────────────────
 
 const dir = await mkdtemp(join(tmpdir(), 'dsh-scihub-'));
-let definition;
-apply({
-	tools: {
-		register(def) {
-			definition = def;
-			return () => {};
+const definitions = new Map();
+apply(
+	{
+		tools: {
+			register(def) {
+				definitions.set(def.name, def);
+				return () => {};
+			},
+		},
+		get(service) {
+			return service === 'workingDirectory' ? { ensure: async () => dir } : undefined;
 		},
 	},
-	get(service) {
-		return service === 'workingDirectory' ? { ensure: async () => dir } : undefined;
-	},
-});
+	{ mirrors: [], mirrorFile: '' }
+);
 
-assert.equal(definition.name, 'scihub_pdf');
+const definition = definitions.get('scihub_pdf');
+const batch = definitions.get('scihub_batch');
+assert.ok(definition, 'scihub_pdf must be registered');
+assert.ok(batch, 'scihub_batch must be registered');
 assert.ok(definition.parameters.properties.doi, 'doi parameter exists');
 assert.ok(definition.parameters.properties.url, 'url parameter exists');
 assert.equal(definition.parameters.required, undefined, 'doi/url are an either/or pair');
+assert.ok(batch.parameters.properties.dois, 'dois parameter exists');
+assert.equal(batch.parameters.required.length, 1, 'dois is required');
+assert.equal(batch.parameters.properties.dois.maxItems, 50, 'batch size is capped');
 
 const run = (args) => definition.execute(args, { agent: { id: 'smoke' } });
+const runBatch = (args) => batch.execute(args, { agent: { id: 'smoke' } });
 
 /** Assert a real PDF landed, and return it. */
 async function assertDownloaded(result, label) {
@@ -102,10 +117,34 @@ try {
 		server.close();
 	}
 
-	// 6) The saved files are all real PDFs in the resolved output directory:
+	// 6) Batch mode: two real DOIs and one that does not exist.
+	console.log('batch mode:');
+	const secondDoi = '10.1126/science.169.3946.635';
+	const batchResult = await runBatch({ dois: [doi, secondDoi, '10.9999/definitely-not-a-real-doi-xyz'] });
+	assert.equal(batchResult.counts.total, 3, 'three DOIs requested');
+	assert.equal(batchResult.counts.downloaded, 2, 'two DOIs should land');
+	assert.equal(batchResult.counts.failed, 1, 'one DOI should fail');
+	assert.equal(batchResult.status, 'partial', 'a mixed batch is partial');
+	assert.equal(batchResult.ok, false, 'a mixed batch is not ok');
+	assert.equal(batchResult.results.length, 3, 'one result per DOI');
+	assert.equal(batchResult.results[0].status, 'downloaded', 'first DOI downloaded');
+	assert.equal(batchResult.results[2].status !== 'downloaded', true, 'the bogus DOI must not be reported as downloaded');
+	assert.ok(batchResult.results[0].path, 'a landed PDF reports its path');
+	assert.ok(batchResult.outDir.endsWith('scihub'), 'the batch reports its output directory');
+	console.log(`  ✓ ${batchResult.counts.downloaded}/${batchResult.counts.total} downloaded, status=${batchResult.status}`);
+
+	const emptyBatch = await runBatch({ dois: [] }).then(
+		() => null,
+		(error) => error
+	);
+	assert.ok(emptyBatch && /Provide `dois`/.test(emptyBatch.message), 'an empty list is rejected');
+	console.log('  ✓ empty dois list rejected');
+
+	// 7) The saved files are all real PDFs in the resolved output directory:
 	//    one named after the DOI, one after the direct link's basename.
 	const saved = (await readdir(join(dir, 'scihub'))).sort();
-	assert.deepEqual(saved, ['10.1038_nature12373.pdf', 'nature12373.pdf'].sort(), `unexpected files: ${saved.join(', ')}`);
+	const expected = ['10.1038_nature12373.pdf', 'nature12373.pdf', '10.1126_science.169.3946.635.pdf'].sort();
+	assert.deepEqual(saved, expected, `unexpected files: ${saved.join(', ')}`);
 	console.log(`  ✓ ${saved.length} distinct files on disk: ${saved.join(', ')}`);
 
 	console.log('input validation:');
@@ -122,6 +161,7 @@ try {
 	}
 
 	console.log('\nrendered:\n' + definition.output.render({ doi }, byDoi)[0].text);
+	console.log('\nrendered (batch):\n' + batch.output.render({}, batchResult)[0].text);
 	console.log('\nOK');
 } finally {
 	await rm(dir, { recursive: true, force: true });
