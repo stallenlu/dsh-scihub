@@ -1,7 +1,10 @@
 {
   "name": "dsh-scihub",
   "version": "0.4.0",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stallenlu/dsh-scihub.git"
+  },
   "type": "module",
   "description": "Sci-Hub PDF fetcher for DeepSeek Harness: the scihub_pdf / scihub_batch model tools resolve DOIs or article URLs through Sci-Hub mirrors, download the paper PDFs and save them into the session workspace.",
   "exports": {
