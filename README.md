@@ -131,22 +131,19 @@ dsh plugin --profile web add github:stallenlu/dsh-scihub
 
 把 `web` 换成自己的 profile 名即可。三种来源任选其一，目录本身也是按「npm → tarball → 源码」这个优先级解析的。
 
-### 本地开发（源码 link）
+### 用 plugin_manager 安装（官方 npm 版本）
+
+在 DSH 会话里也可以直接用 `plugin_manager` 把官方 npm 版本装进当前 profile：
 
 ```bash
-# 在本仓库克隆目录
-plugin_manager install_bundle target=<本目录绝对路径>
+plugin_manager install_bundle target=dsh-scihub@0.4.0
 ```
 
-或手工：把本目录链接进 profile，然后在 `cordis.patch.yml` 里加
+把 `0.4.0` 换成想安装的版本号即可。这与 `dsh plugin --profile <profile> add dsh-scihub` 等价，来源是 npm registry 上已发布的正式包，不依赖任何本地目录。npm 包自带 `cordis.patch.yml`（含 `- insert:` 行），安装后会自动注入 profile 的层栈，**无需**手工在 profile 的 `cordis.patch.yml` 里添加 `- insert:` 块。
 
-```yaml
-- insert:
-    - id: scihub
-      name: 'dsh-scihub'
-```
+> 不要用 `link:<本地目录>` 或 `target=<本目录绝对路径>` 之类的本地源码装法：本地目录一旦被移动或删除，DSH 重启后会报「包不可用 / `dsh: cannot resolve profile bundle "dsh-scihub"`」。指定官方版本号 `dsh-scihub@<version>` 才能一劳永逸。
 
-> 注意：`link:` / `file:` 装的是本地目录，改动 `lib/host.mjs` 后**需要重启 DSH**：profile 里的插件模块按「一次加载」的模块代缓存，不是改文件即刻生效。**但改 `lib/mirrors.json` 不需要重启** —— 它是每次调用重新读的运行时数据。
+> 运行时行为：改动插件的 `lib/host.mjs` 后**需要重启 DSH**（profile 里的插件模块按「一次加载」的模块代缓存，不是改文件即刻生效）；**但改 `lib/mirrors.json` 不需要重启** —— 它是每次调用重新读的运行时数据。
 
 ## 发布新版本
 
