@@ -1,6 +1,6 @@
 # dsh-scihub
 
-DeepSeek Harness 插件：按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF，保存到当前会话工作区。
+DeepSeek Harness 插件：按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF，保存到当前会话工作区，并按文献引用元数据给文件起人类可读的统一名字。
 
 > Sci-Hub 是影子图书馆，其可用性与合法性因司法辖区而异。插件只如实报告它实际拿到了什么，不会把失败包装成成功。
 
@@ -10,9 +10,9 @@ DeepSeek Harness 插件：按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF
 
 | 渠道 | 状态 / 地址 |
 |---|---|
-| **npm 包** | `dsh-scihub@0.4.0` 已发布 → https://www.npmjs.com/package/dsh-scihub |
-| **GitHub Release 预构建包** | `v0.4.0` 已附 `dsh-scihub-0.4.0.tgz` → https://github.com/stallenlu/dsh-scihub/releases/tag/v0.4.0 |
-| **dshmarket 插件市场** | 已向官方目录提交收录 PR [#12966](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/12966)；合并后站点重新生成 `plugins.json`，dshmarket 通常一天内即可搜索并一键安装 |
+| **npm 包** | `dsh-scihub@0.4.1` 已发布 → https://www.npmjs.com/package/dsh-scihub |
+| **GitHub Release 预构建包** | `v0.4.1` 已附 `dsh-scihub-0.4.1.tgz` → https://github.com/stallenlu/dsh-scihub/releases/tag/v0.4.1 |
+| **dshmarket 插件市场** | 已收录进官方目录（收录 PR [#12966](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/12966) 已合并），在 Plugins → Plugin Market 搜索 `dsh-scihub` 即可一键安装 |
 
 目录会优先使用已发布的 npm 包，其次作者提供的 Release 预构建 tarball，最后回退到整仓 GitHub 源码。仓库已加 `dsh-plugin` topic，`package.json` 声明 `dsh.bundle` 且 `repository` 指回本仓库，根目录 `cordis.patch.yml` 含 `- insert:` —— 这些是目录投稿的硬性要求。
 
@@ -62,6 +62,31 @@ DeepSeek Harness 插件：按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF
 | `challenge` | 至少一个镜像返回 Cloudflare Turnstile 人机验证；纯 HTTP 客户端过不去，**无法确认文章是否存在**，所以不能报 not_found |
 | `error` | 网络 / HTTP / 拿回来的不是 PDF，`message` 与 `attempts` 里写原因 |
 
+## 文件名：人类可读的统一命名
+
+0.4.1 起，下载的文件不再一律叫 `10.1038_nature12373.pdf`，而是用 Sci-Hub 文章页上**真实存在**的引用元数据套模板，默认：
+
+```yaml
+fileNameTemplate: '{firstAuthor} ({year}) {title}'
+```
+
+例如 `Watson (1953) Molecular structure of nucleic acids.pdf`。数据来源优先级：Highwire / Dublin Core 的 `<meta>`（`citation_title`、`citation_author`、`citation_date`、`citation_journal_title` …）→ 页面里的 `#citation` 块 → `<title>Sci-Hub | … | …</title>`。**页面没有的字段一律留空，绝不臆造作者或年份**；整篇都没有可用信息时自动回退到旧版 `<doi 压平>.pdf`，老脚本不受影响。
+
+可用占位符：`{title}` `{year}` `{firstAuthor}` / `{author}` `{authors}` `{journal}` `{doi}` `{stem}`（输入 DOI 或直链末段）`{n}`（批量里补零到两位的位序 `01` `02` …）`{index}`（不补零）`{total}`（批量总数）。缺字段不会留下空括号或多余的 ` - ` 分隔符。
+
+在 profile 的 `cordis.patch.yml` 里自定义，例如给批量下载加序号前缀：
+
+```yaml
+- id: scihub
+  name: 'dsh-scihub'
+  config:
+    fileNameTemplate: '{n} {firstAuthor} ({year}) {title}'
+```
+
+把 `fileNameTemplate` 设成空字符串 `''`，即可**完全恢复 0.4.0 的 DOI 命名**（`10.1038_nature12373.pdf`、直链用 URL 末段）。
+
+落盘前还会把 Windows 非法字符 `\/:*?"<>|` 换成空格、保留中文与其它 Unicode、压缩重复空白、按 120 个字符截断、给 `CON` / `COM1` 这类保留设备名加前缀。**同名文件绝不静默覆盖**：内容完全相同就复用（重跑批量幂等），内容不同则依次追加 ` (2)`、` (3)` …，两篇同名论文都能留下。
+
 ## 镜像列表：一键更新
 
 镜像存活是今天的快照，不是永久事实。列表是**数据**，不在代码里：
@@ -108,11 +133,11 @@ node update-mirrors.mjs --doi 10.1103/PhysRevLett.116.061102
 - 只依赖 `node:` 内置模块（`node:https` / `node:http` / `node:fs/promises` / `node:path`），无第三方依赖。
 - `Config` 是自写的 Standard Schema 实现：本包不在 profile 的 node_modules 树里，`import '@deepseek-ai/schemastery'` 会直接 `ERR_MODULE_NOT_FOUND`，所以手写一份保持零依赖。
 - 输出目录通过 `workingDirectory` 服务解析，取不到时退到该服务的默认目录。
-- 文件名：走 DOI 时用 `<doi 压平>.pdf`，直连时用 URL 最后一段。
+- 文件名：默认按引用元数据（作者 / 年份 / 标题）套 `fileNameTemplate` 生成人类可读名，缺元数据则回退到旧的 DOI 名；详见「文件名：人类可读的统一命名」。
 
 ## 安装
 
-### 从插件市场（收录合并后，最省事）
+### 从插件市场（已收录，最省事）
 
 打开 DSH 的 **Plugins → Plugin Market**（dsh 0.2.1+ 是 Plugins 页里紧邻 Installed 的 "Plugin Market" 标签；旧版在 Settings → Plugin Market），搜索 `dsh-scihub`，一键安装。
 
@@ -123,7 +148,7 @@ node update-mirrors.mjs --doi 10.1103/PhysRevLett.116.061102
 dsh plugin --profile web add dsh-scihub
 
 # GitHub Release 预构建 tarball
-dsh plugin --profile web add https://github.com/stallenlu/dsh-scihub/releases/download/v0.4.0/dsh-scihub-0.4.0.tgz
+dsh plugin --profile web add https://github.com/stallenlu/dsh-scihub/releases/download/v0.4.1/dsh-scihub-0.4.1.tgz
 
 # 整仓源码
 dsh plugin --profile web add github:stallenlu/dsh-scihub
@@ -136,7 +161,7 @@ dsh plugin --profile web add github:stallenlu/dsh-scihub
 在 DSH 会话里也可以直接用 `plugin_manager` 把官方 npm 版本装进当前 profile：
 
 ```bash
-plugin_manager install_bundle target=dsh-scihub@0.4.0
+plugin_manager install_bundle target=dsh-scihub@0.4.1
 ```
 
 把 `0.4.0` 换成想安装的版本号即可。这与 `dsh plugin --profile <profile> add dsh-scihub` 等价，来源是 npm registry 上已发布的正式包，不依赖任何本地目录。npm 包自带 `cordis.patch.yml`（含 `- insert:` 行），安装后会自动注入 profile 的层栈，**无需**手工在 profile 的 `cordis.patch.yml` 里添加 `- insert:` 块。
@@ -163,11 +188,12 @@ plugin_manager install_bundle target=dsh-scihub@0.4.0
 ## 自测
 
 ```bash
-node test-smoke.mjs                          # 默认 10.1038/nature12373
+node test-naming.mjs                         # 离线、确定性：命名模板 / 元数据回退 / 清洗
+node test-smoke.mjs                          # 默认 10.1038/nature12373（需联网）
 node test-smoke.mjs 10.1103/PhysRevLett.116.061102
 ```
 
-一条最小端到端检查，覆盖五种输入、五种非法输入，以及批量模式：
+`test-naming.mjs` 完全离线，只测引用元数据解析、命名模板、文件名清洗与旧名回退，适合 CI。`test-smoke.mjs` 是一条最小端到端检查，覆盖五种输入、五种非法输入，以及批量模式：
 
 - `doi`（doi.org 链接，须归一化成裸 DOI）
 - `url` 自带 DOI

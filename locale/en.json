@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Sci-Hub PDF Fetcher",
-    "description": "Adds the scihub_pdf and scihub_batch tools: take a DOI or an article/PDF URL (or a list of DOIs), resolve them through Sci-Hub mirrors, download the paper PDFs and save them into the session workspace. The mirror list lives in lib/mirrors.json and can be refreshed with `node update-mirrors.mjs`."
+    "description": "Adds the scihub_pdf and scihub_batch tools: take a DOI or an article/PDF URL (or a list of DOIs), resolve them through Sci-Hub mirrors, download the paper PDFs and save them into the session workspace. By default the PDFs are given consistent, human-readable names built from the article's citation metadata (author, year, title); fileNameTemplate customises the pattern and an empty value restores the old DOI-based names, and duplicate names are never overwritten. The mirror list lives in lib/mirrors.json and can be refreshed with `node update-mirrors.mjs`."
   }
 }

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Sci-Hub 文献 PDF 抓取",
-    "description": "提供 scihub_pdf 与 scihub_batch 两个工具：给 DOI 或文章/PDF 链接（或一组 DOI），解析后经 Sci-Hub 镜像下载论文 PDF，保存到当前会话工作区。镜像列表放在 lib/mirrors.json，跑 `node update-mirrors.mjs` 即可一键重测更新。"
+    "description": "提供 scihub_pdf 与 scihub_batch 两个工具：给 DOI 或文章/PDF 链接（或一组 DOI），解析后经 Sci-Hub 镜像下载论文 PDF，保存到当前会话工作区。默认按文献引用元数据（作者、年份、标题）统一命名成人类可读的文件名，可用 fileNameTemplate 自定义或留空恢复旧 DOI 命名；同名文件不覆盖。镜像列表放在 lib/mirrors.json，跑 `node update-mirrors.mjs` 即可一键重测更新。"
   }
 }

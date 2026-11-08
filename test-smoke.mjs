@@ -16,13 +16,16 @@ import { join } from 'node:path';
 import assert from 'node:assert/strict';
 
 import { apply, Config, inject } from './lib/host.mjs';
+import { DEFAULT_FILE_NAME_TEMPLATE } from './lib/naming.mjs';
 
 assert.deepEqual(inject, ['tools'], 'plugin must inject the tools service');
 
 // The Standard Schema contract Cordis reads at load time.
 assert.ok(Config['~standard'], 'Config must expose ~standard');
 assert.equal(Config['~standard'].vendor, 'dsh-scihub');
-assert.deepEqual(Config['~standard'].validate({}).value, { mirrors: [], mirrorFile: '' });
+assert.deepEqual(Config['~standard'].validate({}).value, {
+	mirrors: [], mirrorFile: '', fileNameTemplate: DEFAULT_FILE_NAME_TEMPLATE,
+});
 
 // ── fake Cordis context ─────────────────────────────────────────────────────
 
@@ -40,7 +43,9 @@ apply(
 			return service === 'workingDirectory' ? { ensure: async () => dir } : undefined;
 		},
 	},
-	{ mirrors: [], mirrorFile: '' }
+	// Keep the old DOI-based names so this network-dependent smoke test
+	// stays deterministic; test-naming.mjs covers the new naming offline.
+	{ mirrors: [], mirrorFile: '', fileNameTemplate: '' }
 );
 
 const definition = definitions.get('scihub_pdf');
@@ -143,8 +148,13 @@ try {
 	// 7) The saved files are all real PDFs in the resolved output directory:
 	//    one named after the DOI, one after the direct link's basename.
 	const saved = (await readdir(join(dir, 'scihub'))).sort();
-	const expected = ['10.1038_nature12373.pdf', 'nature12373.pdf', '10.1126_science.169.3946.635.pdf'].sort();
-	assert.deepEqual(saved, expected, `unexpected files: ${saved.join(', ')}`);
+	// 0.4.1 de-duplicates collisions with a " (2)" suffix instead of
+	// overwriting, so accept that suffix when checking the expected names.
+	const bases = new Set(saved.map((f) => f.replace(/ \(\d+\)(?=\.pdf$)/, '')));
+	for (const want of ['10.1038_nature12373.pdf', 'nature12373.pdf', '10.1126_science.169.3946.635.pdf']) {
+		assert.ok(bases.has(want), `missing expected file ${want}; got ${saved.join(', ')}`);
+	}
+	assert.ok(saved.every((f) => f.endsWith('.pdf')), 'every saved file is a PDF');
 	console.log(`  ✓ ${saved.length} distinct files on disk: ${saved.join(', ')}`);
 
 	console.log('input validation:');
