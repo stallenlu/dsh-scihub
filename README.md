@@ -10,8 +10,8 @@ DeepSeek Harness 插件：按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF
 
 | 渠道 | 状态 / 地址 |
 |---|---|
-| **npm 包** | `dsh-scihub@0.4.1` 已发布 → https://www.npmjs.com/package/dsh-scihub |
-| **GitHub Release 预构建包** | `v0.4.1` 已附 `dsh-scihub-0.4.1.tgz` → https://github.com/stallenlu/dsh-scihub/releases/tag/v0.4.1 |
+| **npm 包** | `dsh-scihub@0.4.2` 已发布 → https://www.npmjs.com/package/dsh-scihub |
+| **GitHub Release 预构建包** | `v0.4.2` 已附 `dsh-scihub-0.4.2.tgz` → https://github.com/stallenlu/dsh-scihub/releases/tag/v0.4.2 |
 | **dshmarket 插件市场** | 已收录进官方目录（收录 PR [#12966](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/12966) 已合并），在 Plugins → Plugin Market 搜索 `dsh-scihub` 即可一键安装 |
 
 目录会优先使用已发布的 npm 包，其次作者提供的 Release 预构建 tarball，最后回退到整仓 GitHub 源码。仓库已加 `dsh-plugin` topic，`package.json` 声明 `dsh.bundle` 且 `repository` 指回本仓库，根目录 `cordis.patch.yml` 含 `- insert:` —— 这些是目录投稿的硬性要求。
@@ -70,7 +70,7 @@ DeepSeek Harness 插件：按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF
 fileNameTemplate: '{firstAuthor} ({year}) {title}'
 ```
 
-例如 `Watson (1953) Molecular structure of nucleic acids.pdf`。数据来源优先级：Highwire / Dublin Core 的 `<meta>`（`citation_title`、`citation_author`、`citation_date`、`citation_journal_title` …）→ 页面里的 `#citation` 块 → `<title>Sci-Hub | … | …</title>`。**页面没有的字段一律留空，绝不臆造作者或年份**；整篇都没有可用信息时自动回退到旧版 `<doi 压平>.pdf`，老脚本不受影响。
+例如 `Watson (1953) Molecular structure of nucleic acids.pdf`。数据来源优先级：Highwire / Dublin Core 的 `<meta>`（`citation_title`、`citation_author`、`citation_date`、`citation_journal_title` …）→ `<title>Sci-Hub | … | …</title>`；页面里的 `#citation` 块**仅用于补年份**（它的作者/期刊文本无结构，不臆测）。**页面没有的字段一律留空，绝不臆造作者或年份**；整篇都没有可用信息时自动回退到旧版 `<doi 压平>.pdf`，老脚本不受影响。
 
 可用占位符：`{title}` `{year}` `{firstAuthor}` / `{author}` `{authors}` `{journal}` `{doi}` `{stem}`（输入 DOI 或直链末段）`{n}`（批量里补零到两位的位序 `01` `02` …）`{index}`（不补零）`{total}`（批量总数）。缺字段不会留下空括号或多余的 ` - ` 分隔符。
 
@@ -85,7 +85,7 @@ fileNameTemplate: '{firstAuthor} ({year}) {title}'
 
 把 `fileNameTemplate` 设成空字符串 `''`，即可**完全恢复 0.4.0 的 DOI 命名**（`10.1038_nature12373.pdf`、直链用 URL 末段）。
 
-落盘前还会把 Windows 非法字符 `\/:*?"<>|` 换成空格、保留中文与其它 Unicode、压缩重复空白、按 120 个字符截断、给 `CON` / `COM1` 这类保留设备名加前缀。**同名文件绝不静默覆盖**：内容完全相同就复用（重跑批量幂等），内容不同则依次追加 ` (2)`、` (3)` …，两篇同名论文都能留下。
+落盘前还会把 Windows 非法字符 `\/:*?"<>|` 换成空格、保留中文与其它 Unicode、压缩重复空白、解码 HTML 实体（含希腊字母与常见符号）、按 **230 字节**截断（保证加上去重后缀和 `.pdf` 仍不超过常见文件系统的 255 字节上限）、给 `CON` / `COM1` 这类保留设备名加前缀。**同名文件绝不静默覆盖**：内容完全相同就复用（重跑批量幂等），内容不同则依次追加 ` (2)`、` (3)` …，两篇同名论文都能留下。
 
 ## 镜像列表：一键更新
 
@@ -148,7 +148,7 @@ node update-mirrors.mjs --doi 10.1103/PhysRevLett.116.061102
 dsh plugin --profile web add dsh-scihub
 
 # GitHub Release 预构建 tarball
-dsh plugin --profile web add https://github.com/stallenlu/dsh-scihub/releases/download/v0.4.1/dsh-scihub-0.4.1.tgz
+dsh plugin --profile web add https://github.com/stallenlu/dsh-scihub/releases/download/v0.4.2/dsh-scihub-0.4.2.tgz
 
 # 整仓源码
 dsh plugin --profile web add github:stallenlu/dsh-scihub
@@ -161,10 +161,10 @@ dsh plugin --profile web add github:stallenlu/dsh-scihub
 在 DSH 会话里也可以直接用 `plugin_manager` 把官方 npm 版本装进当前 profile：
 
 ```bash
-plugin_manager install_bundle target=dsh-scihub@0.4.1
+plugin_manager install_bundle target=dsh-scihub@0.4.2
 ```
 
-把 `0.4.0` 换成想安装的版本号即可。这与 `dsh plugin --profile <profile> add dsh-scihub` 等价，来源是 npm registry 上已发布的正式包，不依赖任何本地目录。npm 包自带 `cordis.patch.yml`（含 `- insert:` 行），安装后会自动注入 profile 的层栈，**无需**手工在 profile 的 `cordis.patch.yml` 里添加 `- insert:` 块。
+把 `0.4.2` 换成想安装的版本号即可。这与 `dsh plugin --profile <profile> add dsh-scihub` 等价，来源是 npm registry 上已发布的正式包，不依赖任何本地目录。npm 包自带 `cordis.patch.yml`（含 `- insert:` 行），安装后会自动注入 profile 的层栈，**无需**手工在 profile 的 `cordis.patch.yml` 里添加 `- insert:` 块。
 
 > 不要用 `link:<本地目录>` 或 `target=<本目录绝对路径>` 之类的本地源码装法：本地目录一旦被移动或删除，DSH 重启后会报「包不可用 / `dsh: cannot resolve profile bundle "dsh-scihub"`」。指定官方版本号 `dsh-scihub@<version>` 才能一劳永逸。
 

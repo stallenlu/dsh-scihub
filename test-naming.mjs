@@ -10,7 +10,7 @@
  */
 import assert from 'node:assert/strict';
 import {
-	DEFAULT_FILE_NAME_TEMPLATE, MAX_NAME_CHARS,
+	DEFAULT_FILE_NAME_TEMPLATE, MAX_NAME_BYTES,
 	parseCitation, sanitizeFileName, buildPdfFileName,
 } from './lib/naming.mjs';
 
@@ -68,15 +68,23 @@ assert.equal(buildPdfFileName(tmpl2, { doi: '10.1038/nature12373', index: 7, tot
 const sparse = { ...c, year: '', firstAuthor: '', journal: '' };
 assert.equal(buildPdfFileName(cfg, { ...sparse, inputStem: c.doi }), `${TITLE_IN_NAME}.pdf`);
 
-// 8) sanitizeFileName: illegal chars, Windows device names, Unicode, length cap.
+// 8) sanitizeFileName: illegal chars, Windows device names, Unicode, byte cap.
 assert.equal(sanitizeFileName('  a/b:c*d?e"f<g>h|i  '), 'a b c d e f g h i');
 assert.equal(sanitizeFileName('CON'), '_CON');
 assert.equal(sanitizeFileName('COM1.pdf'), '_COM1.pdf');
 assert.equal(sanitizeFileName(''), 'article');
 assert.equal(sanitizeFileName('中文 论文 café'), '中文 论文 café');
-assert.ok(Array.from(sanitizeFileName('x'.repeat(300))).length <= MAX_NAME_CHARS);
+// The cap is in UTF-8 bytes: 120 CJK chars used to be 360 bytes and blew the
+// 255-byte component limit on ext4/APFS once ` (2).pdf` was appended.
+assert.ok(Buffer.byteLength(sanitizeFileName('中'.repeat(300)), 'utf8') <= MAX_NAME_BYTES);
+assert.ok(Buffer.byteLength(sanitizeFileName('中'.repeat(300)) + ' (2).pdf', 'utf8') <= 255);
 
-// 9) HTML entities are decoded for the file name.
+// 9) HTML entities — both numeric and the named ones common in paper titles.
 assert.equal(buildPdfFileName({ fileNameTemplate: '{title}' }, { title: 'A &amp; B &#x2013; C' }), 'A & B – C.pdf');
+assert.equal(
+	buildPdfFileName({ fileNameTemplate: '{title}' }, { title: '&alpha;-synuclein &beta; &deg;C &plusmn;0.1 &copy; 2020' }),
+	'α-synuclein β °C ±0.1 © 2020.pdf'
+);
+assert.equal(sanitizeFileName('&unknown; stays &amp; decoded'), '&unknown; stays & decoded');
 
 console.log('test-naming: ALL PASS');
