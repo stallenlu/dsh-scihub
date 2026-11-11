@@ -74,7 +74,7 @@ assert.equal(Config['~standard'].validate({}).value.fileNameTemplate, '{firstAut
 assert.ok(Config['~standard'].validate({ fileNameTemplate: 123 }).issues, 'non-string template rejected');
 assert.deepEqual(
 	Config['~standard'].validate({ mirrorFile: 'x.json' }).value,
-	{ mirrors: [], mirrorFile: 'x.json', fileNameTemplate: '{firstAuthor} ({year}) {title}' },
+	{ mirrors: [], mirrorFile: 'x.json', fileNameTemplate: '{firstAuthor} ({year}) {title}', libgenMirrors: [] },
 	'validate() still fills defaults (reuses resolveConfig)'
 );
 

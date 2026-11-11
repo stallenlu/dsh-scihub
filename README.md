@@ -1,8 +1,8 @@
 # dsh-scihub
 
-DeepSeek Harness 插件：按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF，保存到当前会话工作区，并按文献引用元数据给文件起人类可读的统一名字。
+DeepSeek Harness 插件：`scihub_pdf` / `scihub_batch` 按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF；`libgen_search` / `libgen_download` 用关键词检索 Library Genesis 并按 MD5 下载书籍或文献。文件保存到当前会话工作区，并按引用/命中元数据起人类可读的统一名字。
 
-> Sci-Hub 是影子图书馆，其可用性与合法性因司法辖区而异。插件只如实报告它实际拿到了什么，不会把失败包装成成功。
+> Sci-Hub 与 Library Genesis 都是影子图书馆，其可用性与合法性因司法辖区而异。插件只如实报告它实际拿到了什么，不会把失败包装成成功。
 
 ## 分发与收录
 
@@ -10,15 +10,15 @@ DeepSeek Harness 插件：按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF
 
 | 渠道 | 状态 / 地址 |
 |---|---|
-| **npm 包** | `dsh-scihub@0.4.2` 已发布 → https://www.npmjs.com/package/dsh-scihub |
-| **GitHub Release 预构建包** | `v0.4.2` 已附 `dsh-scihub-0.4.2.tgz` → https://github.com/stallenlu/dsh-scihub/releases/tag/v0.4.2 |
+| **npm 包** | `dsh-scihub@0.5.0` 已发布 → https://www.npmjs.com/package/dsh-scihub |
+| **GitHub Release 预构建包** | `v0.5.0` 已附 `dsh-scihub-0.5.0.tgz` → https://github.com/stallenlu/dsh-scihub/releases/tag/v0.5.0 |
 | **dshmarket 插件市场** | 已收录进官方目录（收录 PR [#12966](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/12966) 已合并），在 Plugins → Plugin Market 搜索 `dsh-scihub` 即可一键安装 |
 
 目录会优先使用已发布的 npm 包，其次作者提供的 Release 预构建 tarball，最后回退到整仓 GitHub 源码。仓库已加 `dsh-plugin` topic，`package.json` 声明 `dsh.bundle` 且 `repository` 指回本仓库，根目录 `cordis.patch.yml` 含 `- insert:` —— 这些是目录投稿的硬性要求。
 
 ## 提供的能力
 
-注册两个模型工具：
+注册四个模型工具（两个 Sci-Hub、两个 LibGen）：
 
 ### `scihub_pdf` — 单篇
 
@@ -62,9 +62,41 @@ DeepSeek Harness 插件：按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF
 | `challenge` | 至少一个镜像返回 Cloudflare Turnstile 人机验证；纯 HTTP 客户端过不去，**无法确认文章是否存在**，所以不能报 not_found |
 | `error` | 网络 / HTTP / 拿回来的不是 PDF，`message` 与 `attempts` 里写原因 |
 
+## LibGen：关键词检索 + 按 MD5 下载
+
+LibGen 与 Sci-Hub 的用法不同：Sci-Hub 是「已知 DOI → 直接拿 PDF」，LibGen 是「关键词 → 命中列表 → 挑一条下载」。所以拆成两个工具，先用 `libgen_search` 搜，再把选中的 `md5`（连同 `extension` 和标题/作者等书目信息）传给 `libgen_download`。
+
+### `libgen_search` — 关键词检索
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `query` | string | 书名 / 论文标题 / 作者 / ISBN / DOI 等关键词，如 `Deep Learning Goodfellow` |
+| `limit` | integer | 最多返回多少条（1-100，默认 25）；镜像按 25 / 50 / 100 行请求 |
+
+返回每条命中的 `md5`、`title`、`author`、`publisher`、`year`、`language`、`pages`、`size`、`extension`，以及 `mirror` / `count` / `attempts`。镜像逐个尝试，遇到人机验证或占位页如实上报，不会把「没搜到」包装成成功。
+
+### `libgen_download` — 按 MD5 下载
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `md5` | string | 必填，`libgen_search` 命中里的 32 位 MD5 |
+| `extension` | string | 命中里的格式（`pdf` / `epub` / `djvu` …），让保存的文件保留真实扩展名 |
+| `title` / `author` / `year` / … | string | 命中里的书目信息，用于生成人类可读文件名 |
+
+流程：`ads.php?md5=` 落地页 → 解析出 `get.php?md5=...&key=...`（key 由该镜像按页签发，只在同一镜像有效，绝不跨 host 跟随，也不允许跳进本地网络）→ 带浏览器 `Referer` 下载真实文件。下载后拒绝 HTML、空响应，以及 `content-length` 声明大于实际字节的截断文件。文件保存到 `<工作区>/libgen/<name>.<ext>`，走和 Sci-Hub 一样的 `fileNameTemplate` 命名与「同名不覆盖」原子写。LibGen 不只有 PDF，所以扩展名按命中信息 / `Content-Disposition` / PDF 魔数依次判定，不硬编码 `.pdf`。
+
+| status | 含义 |
+|---|---|
+| `downloaded` | 已落盘，给出 `path` / `bytes` / `extension` / `mirror` / `downloadUrl` |
+| `not_found` | 镜像上没有这个文件（或落地页没给下载链接） |
+| `challenge` | 至少一个镜像返回人机验证页面 |
+| `error` | 网络 / HTTP / 拿回来的不是文件，`attempts` 里写原因 |
+
+> LibGen 的镜像存活同样会波动：运行时真源是 `lib/libgen-mirrors.json`，每次调用重读、改完不需要重启 DSH；也可用 `config.libgenMirrors` 覆盖。优先级：`config.libgenMirrors` > `lib/libgen-mirrors.json` > 内置兜底列表。
+
 ## 文件名：人类可读的统一命名
 
-0.4.1 起，下载的文件不再一律叫 `10.1038_nature12373.pdf`，而是用 Sci-Hub 文章页上**真实存在**的引用元数据套模板，默认：
+0.4.1 起，下载的文件不再一律叫 `10.1038_nature12373.pdf`，而是用 Sci-Hub 文章页 / LibGen 命中里**真实存在**的引用或书目元数据套模板，默认：
 
 ```yaml
 fileNameTemplate: '{firstAuthor} ({year}) {title}'
@@ -85,7 +117,7 @@ fileNameTemplate: '{firstAuthor} ({year}) {title}'
 
 把 `fileNameTemplate` 设成空字符串 `''`，即可**完全恢复 0.4.0 的 DOI 命名**（`10.1038_nature12373.pdf`、直链用 URL 末段）。
 
-落盘前还会把 Windows 非法字符 `\/:*?"<>|` 换成空格、保留中文与其它 Unicode、压缩重复空白、解码 HTML 实体（含希腊字母与常见符号）、按 **230 字节**截断（保证加上去重后缀和 `.pdf` 仍不超过常见文件系统的 255 字节上限）、给 `CON` / `COM1` 这类保留设备名加前缀。**同名文件绝不静默覆盖**：内容完全相同就复用（重跑批量幂等），内容不同则依次追加 ` (2)`、` (3)` …，两篇同名论文都能留下。
+落盘前还会把 Windows 非法字符 `\/:*?"<>|` 换成空格、保留中文与其它 Unicode、压缩重复空白、解码 HTML 实体（含希腊字母与常见符号）、按 **230 字节**截断（保证加上去重后缀和扩展名仍不超过常见文件系统的 255 字节上限）、给 `CON` / `COM1` 这类保留设备名加前缀。**同名文件绝不静默覆盖**：内容完全相同就复用（重跑批量幂等），内容不同则依次追加 ` (2)`、` (3)` …，两篇同名论文都能留下。
 
 ## 镜像列表：一键更新
 
@@ -93,6 +125,7 @@ fileNameTemplate: '{firstAuthor} ({year}) {title}'
 
 - 运行时真源是 `lib/mirrors.json`：`{"updatedAt": "...", "mirrors": [...]}`。
 - 每次调用都**重新读**这个文件 → 改完立即生效，**不需要重启 DSH**。
+- LibGen 有独立的 `lib/libgen-mirrors.json`（同样每次调用重读、可用 `config.libgenMirrors` 覆盖）；`update-mirrors.mjs` 只重测 Sci-Hub 镜像。
 
 一键重测并写回：
 
@@ -148,7 +181,7 @@ node update-mirrors.mjs --doi 10.1103/PhysRevLett.116.061102
 dsh plugin --profile web add dsh-scihub
 
 # GitHub Release 预构建 tarball
-dsh plugin --profile web add https://github.com/stallenlu/dsh-scihub/releases/download/v0.4.2/dsh-scihub-0.4.2.tgz
+dsh plugin --profile web add https://github.com/stallenlu/dsh-scihub/releases/download/v0.5.0/dsh-scihub-0.5.0.tgz
 
 # 整仓源码
 dsh plugin --profile web add github:stallenlu/dsh-scihub
@@ -161,14 +194,14 @@ dsh plugin --profile web add github:stallenlu/dsh-scihub
 在 DSH 会话里也可以直接用 `plugin_manager` 把官方 npm 版本装进当前 profile：
 
 ```bash
-plugin_manager install_bundle target=dsh-scihub@0.4.2
+plugin_manager install_bundle target=dsh-scihub@0.5.0
 ```
 
-把 `0.4.2` 换成想安装的版本号即可。这与 `dsh plugin --profile <profile> add dsh-scihub` 等价，来源是 npm registry 上已发布的正式包，不依赖任何本地目录。npm 包自带 `cordis.patch.yml`（含 `- insert:` 行），安装后会自动注入 profile 的层栈，**无需**手工在 profile 的 `cordis.patch.yml` 里添加 `- insert:` 块。
+把 `0.5.0` 换成想安装的版本号即可。这与 `dsh plugin --profile <profile> add dsh-scihub` 等价，来源是 npm registry 上已发布的正式包，不依赖任何本地目录。npm 包自带 `cordis.patch.yml`（含 `- insert:` 行），安装后会自动注入 profile 的层栈，**无需**手工在 profile 的 `cordis.patch.yml` 里添加 `- insert:` 块。
 
 > 不要用 `link:<本地目录>` 或 `target=<本目录绝对路径>` 之类的本地源码装法：本地目录一旦被移动或删除，DSH 重启后会报「包不可用 / `dsh: cannot resolve profile bundle "dsh-scihub"`」。指定官方版本号 `dsh-scihub@<version>` 才能一劳永逸。
 
-> 运行时行为：改动插件的 `lib/host.mjs` 后**需要重启 DSH**（profile 里的插件模块按「一次加载」的模块代缓存，不是改文件即刻生效）；**但改 `lib/mirrors.json` 不需要重启** —— 它是每次调用重新读的运行时数据。
+> 运行时行为：改动插件的 `lib/host.mjs` 后**需要重启 DSH**（profile 里的插件模块按「一次加载」的模块代缓存，不是改文件即刻生效）；**但改 `lib/mirrors.json` / `lib/libgen-mirrors.json` 不需要重启** —— 它们是每次调用重新读的运行时数据。
 
 ## 发布新版本
 
@@ -189,11 +222,13 @@ plugin_manager install_bundle target=dsh-scihub@0.4.2
 
 ```bash
 node test-naming.mjs                         # 离线、确定性：命名模板 / 元数据回退 / 清洗
+node test-integration.mjs                    # 离线：Sci-Hub 全流程 / 命名各分支 / 并发原子写
+node test-libgen.mjs                         # 离线：LibGen 解析 / 检索 / 下载 / 扩展名 / 去重
 node test-smoke.mjs                          # 默认 10.1038/nature12373（需联网）
 node test-smoke.mjs 10.1103/PhysRevLett.116.061102
 ```
 
-`test-naming.mjs` 完全离线，只测引用元数据解析、命名模板、文件名清洗与旧名回退，适合 CI。`test-smoke.mjs` 是一条最小端到端检查，覆盖五种输入、五种非法输入，以及批量模式：
+`test-naming.mjs` 完全离线，只测引用元数据解析、命名模板、文件名清洗与旧名回退，适合 CI。`test-integration.mjs` 用本地假 Sci-Hub 镜像离线覆盖工具注册、命名各分支、并发原子写与 AbortSignal 不泄漏；`test-libgen.mjs` 用本地假 LibGen 镜像离线覆盖结果表解析、检索状态、按 MD5 下载、扩展名保真、Referer、HTML/截断拒绝与去重。`test-smoke.mjs` 是一条需要联网的最小端到端检查，覆盖五种输入、五种非法输入，以及批量模式：
 
 - `doi`（doi.org 链接，须归一化成裸 DOI）
 - `url` 自带 DOI

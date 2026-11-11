@@ -1,12 +1,12 @@
 {
   "name": "dsh-scihub",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/stallenlu/dsh-scihub.git"
   },
   "type": "module",
-  "description": "Sci-Hub PDF fetcher for DeepSeek Harness: the scihub_pdf / scihub_batch model tools resolve DOIs or article URLs through Sci-Hub mirrors, download the paper PDFs and save them into the session workspace with human-readable, consistent file names.",
+  "description": "Sci-Hub / LibGen fetcher for DeepSeek Harness: scihub_pdf / scihub_batch resolve DOIs or article URLs through Sci-Hub mirrors, and libgen_search / libgen_download find books by keyword and fetch the chosen file by MD5. Files land in the session workspace with human-readable, consistent names.",
   "exports": {
     ".": "./lib/host.mjs",
     "./locale/*.json": "./locale/*.json",
@@ -27,7 +27,8 @@
     "update-mirrors.mjs",
     "test-smoke.mjs",
     "test-naming.mjs",
-    "test-integration.mjs"
+    "test-integration.mjs",
+    "test-libgen.mjs"
   ],
   "engines": {
     "node": ">=22"
@@ -38,6 +39,7 @@
     "dsh-plugin",
     "cordis",
     "scihub",
+    "libgen",
     "doi",
     "pdf"
   ],

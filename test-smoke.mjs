@@ -24,7 +24,7 @@ assert.deepEqual(inject, ['tools'], 'plugin must inject the tools service');
 assert.ok(Config['~standard'], 'Config must expose ~standard');
 assert.equal(Config['~standard'].vendor, 'dsh-scihub');
 assert.deepEqual(Config['~standard'].validate({}).value, {
-	mirrors: [], mirrorFile: '', fileNameTemplate: DEFAULT_FILE_NAME_TEMPLATE,
+	mirrors: [], mirrorFile: '', fileNameTemplate: DEFAULT_FILE_NAME_TEMPLATE, libgenMirrors: [],
 });
 
 // ── fake Cordis context ─────────────────────────────────────────────────────
