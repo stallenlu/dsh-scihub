@@ -1,12 +1,12 @@
 {
   "name": "dsh-scihub",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/stallenlu/dsh-scihub.git"
   },
   "type": "module",
-  "description": "Sci-Hub / LibGen fetcher for DeepSeek Harness: scihub_pdf / scihub_batch resolve DOIs or article URLs through Sci-Hub mirrors, and libgen_search / libgen_download find books by keyword and fetch the chosen file by MD5. Files land in the session workspace with human-readable, consistent names.",
+  "description": "Sci-Hub / LibGen fetcher for DeepSeek Harness: scihub_pdf / scihub_batch resolve DOIs or article URLs through Sci-Hub mirrors, and libgen_search / libgen_download find books by keyword and fetch the chosen file by MD5. All outbound requests support HTTP/HTTPS CONNECT proxies (config.proxy or HTTPS_PROXY / HTTP_PROXY / ALL_PROXY with NO_PROXY). Files land in the session workspace with human-readable, consistent names.",
   "exports": {
     ".": "./lib/host.mjs",
     "./locale/*.json": "./locale/*.json",
@@ -28,7 +28,8 @@
     "test-smoke.mjs",
     "test-naming.mjs",
     "test-integration.mjs",
-    "test-libgen.mjs"
+    "test-libgen.mjs",
+    "test-proxy.mjs"
   ],
   "engines": {
     "node": ">=22"

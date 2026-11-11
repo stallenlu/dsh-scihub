@@ -10,8 +10,8 @@ DeepSeek Harness 插件：`scihub_pdf` / `scihub_batch` 按 **DOI 或 URL** 从 
 
 | 渠道 | 状态 / 地址 |
 |---|---|
-| **npm 包** | `dsh-scihub@0.5.0` 已发布 → https://www.npmjs.com/package/dsh-scihub |
-| **GitHub Release 预构建包** | `v0.5.0` 已附 `dsh-scihub-0.5.0.tgz` → https://github.com/stallenlu/dsh-scihub/releases/tag/v0.5.0 |
+| **npm 包** | `dsh-scihub@0.5.1` 已发布 → https://www.npmjs.com/package/dsh-scihub |
+| **GitHub Release 预构建包** | `v0.5.1` 已附 `dsh-scihub-0.5.1.tgz` → https://github.com/stallenlu/dsh-scihub/releases/tag/v0.5.1 |
 | **dshmarket 插件市场** | 已收录进官方目录（收录 PR [#12966](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/12966) 已合并），在 Plugins → Plugin Market 搜索 `dsh-scihub` 即可一键安装 |
 
 目录会优先使用已发布的 npm 包，其次作者提供的 Release 预构建 tarball，最后回退到整仓 GitHub 源码。仓库已加 `dsh-plugin` topic，`package.json` 声明 `dsh.bundle` 且 `repository` 指回本仓库，根目录 `cordis.patch.yml` 含 `- insert:` —— 这些是目录投稿的硬性要求。
@@ -151,9 +151,27 @@ node update-mirrors.mjs --doi 10.1103/PhysRevLett.116.061102
 
 ```yaml
     mirrorFile: C:/Users/me/sci-hub-mirrors.json   # 指向别的 { "mirrors": [...] } 文件
+    proxy: http://127.0.0.1:7897                # 可选：所有出站请求走这个代理
 ```
 
 优先级：`config.mirrors` > `config.mirrorFile` > `lib/mirrors.json`。
+
+## 代理：在受限网络里抓取
+
+本机 DNS 被污染、镜像域名直连超时，但系统里有一个可用的 HTTP 代理时，给插件配 `proxy` 即可让**所有**出站请求（Sci-Hub 页面 / PDF、LibGen 检索 / `get.php` 下载、重定向）都走它。用纯 `node:` 内置模块建 CONNECT 隧道，HTTPS 目标在隧道内再做 TLS，零第三方依赖。
+
+优先级与取值：
+
+| 来源 | 说明 |
+|---|---|
+| `config.proxy` | 显式配置，最优先；例如 `http://127.0.0.1:7897`，可带 `user:pass@` |
+| `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` | 进程环境变量；`https` 目标优先读 `HTTPS_PROXY`，`http` 目标优先读 `HTTP_PROXY`，都没有则 `ALL_PROXY` |
+| `NO_PROXY` | 逗号分隔的豁免名单（`.example.com`、`localhost`、`*`）；命中则不走代理 |
+| 都没设 | 直连 |
+
+两个安全细节：**环境变量代理不会劫持字面本地/私网目标**（`127.0.0.1`、`192.168.*` 等），所以离线自测的本地假镜像不会被环境里的代理带偏；只有 `config.proxy` 显式指定时才会连本地代理。派生 URL 的 SSRF 防护照常生效——重定向和页面里刮出的下载链接仍要过 `assertSafeDerivedUrl`，禁止跳进本地网络。
+
+> 代理只解决「连不上」：DNS 污染、TCP 被拦这类问题。上游镜像本身要是已经关站或只回占位页（例如 2026-11 本机探测到的 `libgen.*` 641B nginx 占位页），走代理也下不到文件——这时需要更新 `lib/mirrors.json` / `lib/libgen-mirrors.json` 里真正存活的镜像。
 
 ## 实现要点
 
@@ -162,7 +180,7 @@ node update-mirrors.mjs --doi 10.1103/PhysRevLett.116.061102
 - 其余候选的死法：`.se .ink .io .work .tech .3800808.xyz .nsm.plus` 无 DNS；`.st .box .mksa.top` 是 DDoS-Guard 403；`.wf` 503；`.ru` 是 Cloudflare「are you a robot」；`.tf` 404、`.cat` 501、`.pub .help .li .tw` 超时/重置；`.ist` 同为停放壳。
 - 文章页的 PDF 链接来自 `<embed id="pdf" src="...">`；页面「save」按钮里那份 JSON 转义的同一链接（`\\\\/`）也会被解析。
 - 下载后校验 `%PDF-` 魔数；命中 HTML 广告页或验证页一律判失败，不落盘。
-- 用 `node:https` 而不是 `fetch`：Sci-Hub 的 PDF CDN（`sci.bban.top`）对 `fetch()` 会 abort/超时，`node:https` 正常返回 PDF。
+- 用 `node:https` 而不是 `fetch`：Sci-Hub 的 PDF CDN（`sci.bban.top`）对 `fetch()` 会 abort/超时，`node:https` 正常返回 PDF。代理支持也建在它上面：给 `client.get()` 装一个自己实现 `createConnection` 的 `Agent`，先 `CONNECT` 再（HTTPS 时）`tls.connect`；`AbortSignal` 交给原生请求，不会逐次累积监听器。
 - 只依赖 `node:` 内置模块（`node:https` / `node:http` / `node:fs/promises` / `node:path`），无第三方依赖。
 - `Config` 是自写的 Standard Schema 实现：本包不在 profile 的 node_modules 树里，`import '@deepseek-ai/schemastery'` 会直接 `ERR_MODULE_NOT_FOUND`，所以手写一份保持零依赖。
 - 输出目录通过 `workingDirectory` 服务解析，取不到时退到该服务的默认目录。
@@ -181,7 +199,7 @@ node update-mirrors.mjs --doi 10.1103/PhysRevLett.116.061102
 dsh plugin --profile web add dsh-scihub
 
 # GitHub Release 预构建 tarball
-dsh plugin --profile web add https://github.com/stallenlu/dsh-scihub/releases/download/v0.5.0/dsh-scihub-0.5.0.tgz
+dsh plugin --profile web add https://github.com/stallenlu/dsh-scihub/releases/download/v0.5.1/dsh-scihub-0.5.1.tgz
 
 # 整仓源码
 dsh plugin --profile web add github:stallenlu/dsh-scihub
@@ -194,10 +212,10 @@ dsh plugin --profile web add github:stallenlu/dsh-scihub
 在 DSH 会话里也可以直接用 `plugin_manager` 把官方 npm 版本装进当前 profile：
 
 ```bash
-plugin_manager install_bundle target=dsh-scihub@0.5.0
+plugin_manager install_bundle target=dsh-scihub@0.5.1
 ```
 
-把 `0.5.0` 换成想安装的版本号即可。这与 `dsh plugin --profile <profile> add dsh-scihub` 等价，来源是 npm registry 上已发布的正式包，不依赖任何本地目录。npm 包自带 `cordis.patch.yml`（含 `- insert:` 行），安装后会自动注入 profile 的层栈，**无需**手工在 profile 的 `cordis.patch.yml` 里添加 `- insert:` 块。
+把 `0.5.1` 换成想安装的版本号即可。这与 `dsh plugin --profile <profile> add dsh-scihub` 等价，来源是 npm registry 上已发布的正式包，不依赖任何本地目录。npm 包自带 `cordis.patch.yml`（含 `- insert:` 行），安装后会自动注入 profile 的层栈，**无需**手工在 profile 的 `cordis.patch.yml` 里添加 `- insert:` 块。
 
 > 不要用 `link:<本地目录>` 或 `target=<本目录绝对路径>` 之类的本地源码装法：本地目录一旦被移动或删除，DSH 重启后会报「包不可用 / `dsh: cannot resolve profile bundle "dsh-scihub"`」。指定官方版本号 `dsh-scihub@<version>` 才能一劳永逸。
 
@@ -224,11 +242,12 @@ plugin_manager install_bundle target=dsh-scihub@0.5.0
 node test-naming.mjs                         # 离线、确定性：命名模板 / 元数据回退 / 清洗
 node test-integration.mjs                    # 离线：Sci-Hub 全流程 / 命名各分支 / 并发原子写
 node test-libgen.mjs                         # 离线：LibGen 解析 / 检索 / 下载 / 扩展名 / 去重
+node test-proxy.mjs                          # 离线：代理解析 / CONNECT 隧道 / 重定向 / 信号不泄漏
 node test-smoke.mjs                          # 默认 10.1038/nature12373（需联网）
 node test-smoke.mjs 10.1103/PhysRevLett.116.061102
 ```
 
-`test-naming.mjs` 完全离线，只测引用元数据解析、命名模板、文件名清洗与旧名回退，适合 CI。`test-integration.mjs` 用本地假 Sci-Hub 镜像离线覆盖工具注册、命名各分支、并发原子写与 AbortSignal 不泄漏；`test-libgen.mjs` 用本地假 LibGen 镜像离线覆盖结果表解析、检索状态、按 MD5 下载、扩展名保真、Referer、HTML/截断拒绝与去重。`test-smoke.mjs` 是一条需要联网的最小端到端检查，覆盖五种输入、五种非法输入，以及批量模式：
+`test-naming.mjs` 完全离线，只测引用元数据解析、命名模板、文件名清洗与旧名回退，适合 CI。`test-integration.mjs` 用本地假 Sci-Hub 镜像离线覆盖工具注册、命名各分支、并发原子写与 AbortSignal 不泄漏；`test-libgen.mjs` 用本地假 LibGen 镜像离线覆盖结果表解析、检索状态、按 MD5 下载、扩展名保真、Referer、HTML/截断拒绝与去重；`test-proxy.mjs` 用本地假 CONNECT 代理离线覆盖 `resolveProxyUrl` 优先级、`NO_PROXY` 豁免、隧道内 GET / Referer / UA、重定向二次建隧道、代理拒绝、`config.proxy` 接线与 AbortSignal 不累积。`test-smoke.mjs` 是一条需要联网的最小端到端检查，覆盖五种输入、五种非法输入，以及批量模式：
 
 - `doi`（doi.org 链接，须归一化成裸 DOI）
 - `url` 自带 DOI
