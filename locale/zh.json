@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Sci-Hub / LibGen 文献抓取",
-    "description": "提供四个工具。scihub_pdf / scihub_batch 按 DOI 或文章/PDF 链接（或一组 DOI）经 Sci-Hub 镜像下载论文 PDF 到 `scihub/`。libgen_search 用关键词检索 Library Genesis，返回含 MD5、标题、作者、年份、大小、格式的命中列表；libgen_download 按选中条目的 MD5 下载文件到 `libgen/`，保留真实扩展名（pdf / epub / djvu …）。所有出站请求支持 HTTP/HTTPS CONNECT 代理（config.proxy，或 HTTPS_PROXY / HTTP_PROXY / ALL_PROXY 环境变量并尊重 NO_PROXY），用于镜像只能经代理访问的网络。所有文件默认按引用/命中元数据（作者、年份、标题）统一命名成人类可读的文件名，可用 fileNameTemplate 自定义或留空恢复旧 DOI 命名；同名文件不覆盖。镜像列表放在 lib/mirrors.json 与 lib/libgen-mirrors.json，每次调用重新读、无需重启；Sci-Hub 镜像可跑 `node update-mirrors.mjs` 一键重测更新。"
+    "description": "提供四个工具。scihub_pdf / scihub_batch 按 DOI 或文章/PDF 链接（或一组 DOI）经 Sci-Hub 镜像下载论文 PDF 到 `scihub/`。libgen_search 用关键词检索 Library Genesis，返回含 MD5、标题、作者、年份、大小、格式的命中列表；libgen_download 按选中条目的 MD5 下载文件到 `libgen/`，保留真实扩展名（pdf / epub / djvu …）。所有出站请求支持 HTTP/HTTPS CONNECT 代理（config.proxy，或 HTTPS_PROXY / HTTP_PROXY / ALL_PROXY 环境变量并尊重 NO_PROXY），用于镜像只能经代理访问的网络。所有文件默认按引用/命中元数据（作者、年份、标题）统一命名成人类可读的文件名，可用 fileNameTemplate 自定义或留空恢复旧 DOI 命名；同名文件不覆盖。镜像列表放在 lib/mirrors.json 与 lib/libgen-mirrors.json，每次调用重新读、无需重启；Sci-Hub 镜像可跑 `node update-mirrors.mjs` 一键重测更新。批量下载用 4 个 worker 有界并发且结果按输入顺序返回，批内不可达镜像后续跳过，截断的下载与需要浏览器验证的页面一律判失败而不落盘。"
   }
 }
