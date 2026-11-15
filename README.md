@@ -18,7 +18,15 @@ DeepSeek Harness 插件：`scihub_pdf` / `scihub_batch` 按 **DOI 或 URL** 从 
 
 ## 提供的能力
 
-注册四个模型工具（两个 Sci-Hub、两个 LibGen）：
+注册四个模型工具（两个 Sci-Hub、两个 LibGen），外加三处横切能力。按版本累计如下，后面各节展开说明：
+
+| 能力 | 工具 / 机制 | 首见于 |
+|---|---|---|
+| Sci-Hub 单篇 / 批量 PDF 下载 | `scihub_pdf` / `scihub_batch` | 0.4.0 |
+| 人类可读统一命名 + 同名不覆盖 | `fileNameTemplate` + 原子写 | 0.4.1 |
+| LibGen 关键词检索 + 按 MD5 下载 | `libgen_search` / `libgen_download` | 0.5.0 |
+| HTTP/HTTPS CONNECT 代理 | `config.proxy` / 环境变量 / `NO_PROXY` | 0.5.1 |
+| 有界并发批量 / 死镜像跳过 / 截断与验证墙拒绝 | 批量 worker + `truncationReason()` + `isChallenge()` | 0.5.2 |
 
 ### `scihub_pdf` — 单篇
 
@@ -35,7 +43,7 @@ DeepSeek Harness 插件：`scihub_pdf` / `scihub_batch` 按 **DOI 或 URL** 从 
 |---|---|---|
 | `dois` | string[] | 裸 DOI 列表，最多 50 条 |
 
-逐条走和 `scihub_pdf` 完全一样的镜像流程，返回一个汇总：
+每篇走和 `scihub_pdf` 一样的镜像流程；0.5.2 起以 4 个 worker 有界并发执行，结果按输入顺序回填（`{n}` 编号仍对应原始位序），并共享「死镜像」集合跳过已判定不可达的镜像。返回一个汇总：
 
 | status | 含义 |
 |---|---|
