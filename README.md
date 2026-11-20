@@ -10,15 +10,15 @@ DeepSeek Harness 插件：`scihub_pdf` / `scihub_batch` 按 **DOI 或 URL** 从 
 
 | 渠道 | 状态 / 地址 |
 |---|---|
-| **npm 包** | `dsh-scihub@0.5.2` 已发布 → https://www.npmjs.com/package/dsh-scihub |
-| **GitHub Release 预构建包** | `v0.5.2` 已附 `dsh-scihub-0.5.2.tgz` → https://github.com/stallenlu/dsh-scihub/releases/tag/v0.5.2 |
+| **npm 包** | `dsh-scihub@0.5.3` 已发布 → https://www.npmjs.com/package/dsh-scihub |
+| **GitHub Release 预构建包** | `v0.5.3` 已附 `dsh-scihub-0.5.3.tgz` → https://github.com/stallenlu/dsh-scihub/releases/tag/v0.5.3 |
 | **dshmarket 插件市场** | 已收录进官方目录（收录 PR [#12966](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/12966) 已合并），在 Plugins → Plugin Market 搜索 `dsh-scihub` 即可一键安装 |
 
 目录会优先使用已发布的 npm 包，其次作者提供的 Release 预构建 tarball，最后回退到整仓 GitHub 源码。仓库已加 `dsh-plugin` topic，`package.json` 声明 `dsh.bundle` 且 `repository` 指回本仓库，根目录 `cordis.patch.yml` 含 `- insert:` —— 这些是目录投稿的硬性要求。
 
 ## 提供的能力
 
-注册四个模型工具（两个 Sci-Hub、两个 LibGen），外加三处横切能力。按版本累计如下，后面各节展开说明：
+注册五个模型工具（三个 Sci-Hub、两个 LibGen），外加三处横切能力。按版本累计如下，后面各节展开说明：
 
 | 能力 | 工具 / 机制 | 首见于 |
 |---|---|---|
@@ -27,6 +27,7 @@ DeepSeek Harness 插件：`scihub_pdf` / `scihub_batch` 按 **DOI 或 URL** 从 
 | LibGen 关键词检索 + 按 MD5 下载 | `libgen_search` / `libgen_download` | 0.5.0 |
 | HTTP/HTTPS CONNECT 代理 | `config.proxy` / 环境变量 / `NO_PROXY` | 0.5.1 |
 | 有界并发批量 / 死镜像跳过 / 截断与验证墙拒绝 | 批量 worker + `truncationReason()` + `isChallenge()` | 0.5.2 |
+| 镜像自愈（重测候选、踢死换活、写回即生效） | `scihub_refresh_mirrors` | 0.5.3 |
 
 ### `scihub_pdf` — 单篇
 
@@ -188,6 +189,17 @@ node update-mirrors.mjs --doi 10.1103/PhysRevLett.116.061102
 - **截断拒绝**：`content-length` 声明的长度大于实际收到的字节时判为失败，不把半截 PDF 当成功落盘。Sci-Hub 页面 / 直链 PDF 与 LibGen 下载共用同一个 `truncationReason()` 校验。
 - **通用验证墙识别**：`isChallenge()` 除了 Sci-Hub 专有措辞，也认 `Just a moment` / `Attention Required` / `cf-browser-verification` / `cf_chl_` 等通用 Cloudflare 文案，避免把「需要浏览器验证」误报成「没找到文章」。
 
+## 镜像自愈（0.5.3 起）
+
+Sci-Hub 镜像会随网络/辖区频繁失效、或被 Cloudflare 验证墙拦住。除了上面「上次成功优先 + 批量跳过死镜像」的自适应，**0.5.3 起还能主动重测镜像列表**：
+
+- 下载若返回「镜像要求人机验证(challenge)」或「所有镜像都失败」，结果提示里会告诉你直接调用 `scihub_refresh_mirrors` 工具自愈。
+- `scihub_refresh_mirrors`（可选 `doi` 参数，默认 `10.1038/nature12373`）会并发探测全部 24 个候选镜像，只有真正下载到以 `%PDF-` 开头的 PDF 才算活着；按速度排序写回 `lib/mirrors.json`，**立即生效、无需重启 DSH**。
+- 一个活镜像都没有时保留旧列表，不会把列表清空。
+- 命令行 `node update-mirrors.mjs [--doi <doi>]` 与这个工具共用同一份探测逻辑（`lib/mirrors.mjs` 的 `refreshMirrors()`），两处列表不会漂移。
+
+> 自愈只把路由切到当前能下的镜像。Cloudflare Turnstile 这类验证墙无法用纯 HTTP 客户端绕过——`scihub_refresh_mirrors` 会跳过正在挑战的镜像，挑一个不挑战的；如果所有镜像都在挑战，只能稍后重试或在浏览器里手动下载。
+
 ## 实现要点
 
 - 上一次成功的镜像会被提到最前面，所以列表里哪天死一个，只会在第一次请求时白跑一趟，之后不再付这个代价。
@@ -214,7 +226,7 @@ node update-mirrors.mjs --doi 10.1103/PhysRevLett.116.061102
 dsh plugin --profile web add dsh-scihub
 
 # GitHub Release 预构建 tarball
-dsh plugin --profile web add https://github.com/stallenlu/dsh-scihub/releases/download/v0.5.2/dsh-scihub-0.5.2.tgz
+dsh plugin --profile web add https://github.com/stallenlu/dsh-scihub/releases/download/v0.5.3/dsh-scihub-0.5.3.tgz
 
 # 整仓源码
 dsh plugin --profile web add github:stallenlu/dsh-scihub
@@ -227,10 +239,10 @@ dsh plugin --profile web add github:stallenlu/dsh-scihub
 在 DSH 会话里也可以直接用 `plugin_manager` 把官方 npm 版本装进当前 profile：
 
 ```bash
-plugin_manager install_bundle target=dsh-scihub@0.5.2
+plugin_manager install_bundle target=dsh-scihub@0.5.3
 ```
 
-把 `0.5.2` 换成想安装的版本号即可。这与 `dsh plugin --profile <profile> add dsh-scihub` 等价，来源是 npm registry 上已发布的正式包，不依赖任何本地目录。npm 包自带 `cordis.patch.yml`（含 `- insert:` 行），安装后会自动注入 profile 的层栈，**无需**手工在 profile 的 `cordis.patch.yml` 里添加 `- insert:` 块。
+把 `0.5.3` 换成想安装的版本号即可。这与 `dsh plugin --profile <profile> add dsh-scihub` 等价，来源是 npm registry 上已发布的正式包，不依赖任何本地目录。npm 包自带 `cordis.patch.yml`（含 `- insert:` 行），安装后会自动注入 profile 的层栈，**无需**手工在 profile 的 `cordis.patch.yml` 里添加 `- insert:` 块。
 
 > 不要用 `link:<本地目录>` 或 `target=<本目录绝对路径>` 之类的本地源码装法：本地目录一旦被移动或删除，DSH 重启后会报「包不可用 / `dsh: cannot resolve profile bundle "dsh-scihub"`」。指定官方版本号 `dsh-scihub@<version>` 才能一劳永逸。
 
@@ -259,11 +271,12 @@ node test-integration.mjs                    # 离线：Sci-Hub 全流程 / 命�
 node test-libgen.mjs                         # 离线：LibGen 解析 / 检索 / 下载 / 扩展名 / 去重
 node test-proxy.mjs                          # 离线：代理解析 / CONNECT 隧道 / 重定向 / 信号不泄漏
 node test-optimizations.mjs                  # 离线：并发保序 / 死镜像跳过 / 截断与验证墙识别
+node test-refresh.mjs                        # 离线：镜像重测写回 / 全死保留旧表 / 自愈工具注册
 node test-smoke.mjs                          # 默认 10.1038/nature12373（需联网）
 node test-smoke.mjs 10.1103/PhysRevLett.116.061102
 ```
 
-`test-naming.mjs` 完全离线，只测引用元数据解析、命名模板、文件名清洗与旧名回退，适合 CI。`test-integration.mjs` 用本地假 Sci-Hub 镜像离线覆盖工具注册、命名各分支、并发原子写与 AbortSignal 不泄漏；`test-libgen.mjs` 用本地假 LibGen 镜像离线覆盖结果表解析、检索状态、按 MD5 下载、扩展名保真、Referer、HTML/截断拒绝与去重；`test-proxy.mjs` 用本地假 CONNECT 代理离线覆盖 `resolveProxyUrl` 优先级、`NO_PROXY` 豁免、隧道内 GET / Referer / UA、重定向二次建隧道、代理拒绝、`config.proxy` 接线与 AbortSignal 不累积。`test-optimizations.mjs` 用可编程的本地假镜像离线覆盖批量有界并发且保序、死镜像按 worker 数去重、通用 Cloudflare 文案判 `challenge`，并直接单测 `truncationReason()`。`test-smoke.mjs` 是一条需要联网的最小端到端检查，覆盖五种输入、五种非法输入，以及批量模式：
+`test-naming.mjs` 完全离线，只测引用元数据解析、命名模板、文件名清洗与旧名回退，适合 CI。`test-integration.mjs` 用本地假 Sci-Hub 镜像离线覆盖工具注册、命名各分支、并发原子写与 AbortSignal 不泄漏；`test-libgen.mjs` 用本地假 LibGen 镜像离线覆盖结果表解析、检索状态、按 MD5 下载、扩展名保真、Referer、HTML/截断拒绝与去重；`test-proxy.mjs` 用本地假 CONNECT 代理离线覆盖 `resolveProxyUrl` 优先级、`NO_PROXY` 豁免、隧道内 GET / Referer / UA、重定向二次建隧道、代理拒绝、`config.proxy` 接线与 AbortSignal 不累积。`test-optimizations.mjs` 用可编程的本地假镜像离线覆盖批量有界并发且保序、死镜像按 worker 数去重、通用 Cloudflare 文案判 `challenge`，并直接单测 `truncationReason()`。`test-refresh.mjs` 用本地假镜像离线覆盖镜像自愈：候选探测后只写回实测能下到 PDF 的镜像（按速度排序）、全死时保留旧表不改文件，以及 `scihub_refresh_mirrors` 工具注册与人类可读输出。`test-smoke.mjs` 是一条需要联网的最小端到端检查，覆盖五种输入、五种非法输入，以及批量模式：
 
 - `doi`（doi.org 链接，须归一化成裸 DOI）
 - `url` 自带 DOI

@@ -1,12 +1,12 @@
 {
   "name": "dsh-scihub",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/stallenlu/dsh-scihub.git"
   },
   "type": "module",
-  "description": "Sci-Hub / LibGen fetcher for DeepSeek Harness: scihub_pdf / scihub_batch resolve DOIs or article URLs through Sci-Hub mirrors, and libgen_search / libgen_download find books by keyword and fetch the chosen file by MD5. All outbound requests support HTTP/HTTPS CONNECT proxies (config.proxy or HTTPS_PROXY / HTTP_PROXY / ALL_PROXY with NO_PROXY). Files land in the session workspace with human-readable, consistent names. Batches run with bounded parallelism, dead mirrors are skipped, and truncated or challenge responses are rejected rather than saved.",
+  "description": "Sci-Hub / LibGen fetcher for DeepSeek Harness: scihub_pdf / scihub_batch resolve DOIs or article URLs through Sci-Hub mirrors, and libgen_search / libgen_download find books by keyword and fetch the chosen file by MD5. All outbound requests support HTTP/HTTPS CONNECT proxies (config.proxy or HTTPS_PROXY / HTTP_PROXY / ALL_PROXY with NO_PROXY). Files land in the session workspace with human-readable, consistent names. Batches run with bounded parallelism, dead mirrors are skipped, and truncated or challenge responses are rejected rather than saved. scihub_refresh_mirrors re-probes all candidate mirrors and writes back the live ones for self-healing after captcha or mirror death.",
   "exports": {
     ".": "./lib/host.mjs",
     "./locale/*.json": "./locale/*.json",
@@ -30,7 +30,8 @@
     "test-integration.mjs",
     "test-libgen.mjs",
     "test-proxy.mjs",
-    "test-optimizations.mjs"
+    "test-optimizations.mjs",
+    "test-refresh.mjs"
   ],
   "engines": {
     "node": ">=22"
