@@ -12,8 +12,13 @@
  */
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { saveZlibFile } from './lib/host.mjs';
 import {
 	getSession,
+	zlibDownload,
 	eapiRequest,
 	zlibStatus,
 	zlibSearch,
@@ -61,8 +66,8 @@ async function temporaryEnv(values, fn) {
 }
 
 /** Start a fake EAPI server. `state.expired`/`state.exhausted` can be flipped mid-test. */
-async function startFakeEapi({ expired = false, exhausted = false, rootMode = 'ok' } = {}) {
-	const state = { expired, exhausted, rootMode, logins: 0, requests: [], deleted: [] };
+async function startFakeEapi({ expired = false, exhausted = false, rootMode = 'ok', cdnMode = 'pdf' } = {}) {
+	const state = { expired, exhausted, rootMode, cdnMode, logins: 0, requests: [], deleted: [], cdnHits: [] };
 	const server = http.createServer((req, res) => {
 		const chunks = [];
 		req.on('data', (c) => chunks.push(c));
@@ -136,6 +141,40 @@ async function startFakeEapi({ expired = false, exhausted = false, rootMode = 'o
 				if (!hasAuth) return send(403, { success: 0, error: 'Access denied' });
 				state.deleted.push(deleteMatch[1]);
 				return send(200, { success: 1, deleted: deleteMatch[1] });
+			}
+			// ── T4 routes (additive; T2/T3 behavior untouched) ──
+			const origin = `http://${req.headers.host}`;
+			const fileMatch = /^\/eapi\/book\/([^/]+)\/([^/]+)\/file$/.exec(path);
+			if (fileMatch && req.method === 'GET') {
+				if (!hasAuth) return send(403, { success: 0, error: 'Access denied' });
+				const [, id, hash] = fileMatch;
+				return send(200, {
+					success: 1,
+					url: `${origin}/cdn/${id}/${hash}`,
+					book: { id, hash, title: 'Zlib Test Book', author: 'Ada Lovelace', year: '2020' },
+				});
+			}
+			const cdnMatch = /^\/cdn\/([^/]+)\/([^/]+)$/.exec(path);
+			if (cdnMatch && req.method === 'GET') {
+				state.cdnHits.push({ url: req.url, headers: { ...req.headers } });
+				if (cdnMode === 'html') {
+					res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+					return res.end('<html><head><title>Just a moment...</title></head><body>Checking your browser before we continue</body></html>');
+				}
+				if (cdnMode === 'truncated') {
+					const short = Buffer.from('%PDF-1.4 partial-body', 'latin1');
+					res.writeHead(200, { 'content-type': 'application/pdf', 'content-length': String(short.length + 100) });
+					res.write(short);
+					return res.socket.destroy();
+				}
+				if (cdnMode === 'epub') {
+					const epub = Buffer.from('PK\x03\x04 zlib-epub ' + 'e'.repeat(40), 'latin1');
+					res.writeHead(200, { 'content-type': 'application/epub+zip' });
+					return res.end(epub);
+				}
+				const pdf = Buffer.from('%PDF-1.4 zlib-test ' + 'y'.repeat(48), 'latin1');
+				res.writeHead(200, { 'content-type': 'application/pdf' });
+				return res.end(pdf);
 			}
 			// Domain probe target for zlibCheckDomains: lightweight HTML, no creds.
 			if (path === '/') {
@@ -682,6 +721,160 @@ assert.equal(STATUS_QUOTA_EXHAUSTED, 'quota_exhausted');
 		);
 	} finally {
 		await fx.close();
+	}
+}
+
+// ═════════════════════════ T4: zlibDownload + saveZlibFile tests ═══════════════
+// Appended after the T2/T3 blocks above; those blocks remain untouched.
+
+// ── T4.1: /file → CDN GET strips remix headers + cookies, sets Referer ─────────
+{
+	const fx = await startFakeEapi();
+	try {
+		await temporaryEnv(
+			{ ZLIB_EMAIL: FAKE_EMAIL, ZLIB_PASSWORD: FAKE_PASSWORD, ZLIB_DOMAIN: fx.base },
+			async () => {
+				const { result, lines } = await captureConsole(async () => {
+					const res = await zlibDownload({ id: '123', hash: 'abc', meta: { title: 'Zlib Test Book', author: 'Ada Lovelace', year: '2020' } });
+					assert.equal(res.ok, true, 'download: ok true');
+					assert.equal(res.status, STATUS_OK, 'download: status ok');
+					assert.equal(res.httpStatus, 200, 'download: CDN HTTP status forwarded');
+					assert.ok(Buffer.isBuffer(res.body), 'download: body is a Buffer');
+					assert.match(res.body.toString('latin1'), /^%PDF-/, 'download: PDF magic body returned');
+					assert.ok(res.headers && typeof res.headers === 'object', 'download: headers returned');
+					assert.match(res.message, /下载|成功|文件/, 'download: Chinese message');
+					return res;
+				});
+				assertNoCredentialLeak(lines);
+				assertNoCredentialsIn(result);
+
+				const fileCall = fx.state.requests.find((r) => r.url === '/eapi/book/123/abc/file');
+				assert.ok(fileCall, 'download: /file endpoint called');
+				assert.equal(fileCall.method, 'GET', 'download: /file uses GET');
+				assert.equal(fileCall.headers['remix-userid'], FAKE_USERID, 'download: /file carries auth header');
+
+				assert.equal(fx.state.cdnHits.length, 1, 'download: exactly one CDN hit');
+				const cdn = fx.state.cdnHits[0];
+				assert.equal(cdn.headers['remix-userid'], undefined, 'download: CDN has no remix-userid header');
+				assert.equal(cdn.headers['remix-userkey'], undefined, 'download: CDN has no remix-userkey header');
+				assert.equal(cdn.headers.cookie, undefined, 'download: CDN has no cookie header');
+				assert.match(cdn.headers.referer, /eapi\/book\/123\/abc\/file$/, 'download: CDN Referer is the book file page');
+			}
+		);
+	} finally {
+		await fx.close();
+	}
+}
+
+// ── T4.2: fileNameHint uses buildFileNameStem with default template ───────────
+{
+	const fx = await startFakeEapi();
+	try {
+		await temporaryEnv(
+			{ ZLIB_EMAIL: FAKE_EMAIL, ZLIB_PASSWORD: FAKE_PASSWORD, ZLIB_DOMAIN: fx.base },
+			async () => {
+				const { result, lines } = await captureConsole(async () => {
+					const res = await zlibDownload({
+						id: '123', hash: 'abc',
+						meta: { title: 'Clean Code', author: 'Robert C. Martin', year: '2008' },
+					});
+					assert.equal(res.ok, true, 'naming: download ok');
+					assert.equal(res.fileNameHint, 'Martin (2008) Clean Code.pdf', 'naming: default template applied');
+					return res;
+				});
+				assertNoCredentialLeak(lines);
+				assertNoCredentialsIn(result);
+			}
+		);
+	} finally {
+		await fx.close();
+	}
+}
+
+// ── T4.3: non-PDF format accepted by magic; HTML/challenge rejected ───────────
+{
+	const fxEpub = await startFakeEapi({ cdnMode: 'epub' });
+	const fxHtml = await startFakeEapi({ cdnMode: 'html' });
+	try {
+		await temporaryEnv(
+			{ ZLIB_EMAIL: FAKE_EMAIL, ZLIB_PASSWORD: FAKE_PASSWORD, ZLIB_DOMAIN: fxEpub.base },
+			async () => {
+				const { result, lines } = await captureConsole(async () => {
+					const res = await zlibDownload({ id: '222', hash: 'def', meta: { title: 'EPUB Book' } });
+					assert.equal(res.ok, true, 'epub: ok true');
+					assert.match(res.fileNameHint, /\.epub$/, 'epub: extension preserved from magic');
+					assert.match(res.body.toString('latin1'), /^PK/, 'epub: EPUB body returned');
+					return res;
+				});
+				assertNoCredentialLeak(lines);
+				assertNoCredentialsIn(result);
+			}
+		);
+		await temporaryEnv(
+			{ ZLIB_EMAIL: FAKE_EMAIL, ZLIB_PASSWORD: FAKE_PASSWORD, ZLIB_DOMAIN: fxHtml.base },
+			async () => {
+				const { result, lines } = await captureConsole(async () => {
+					const res = await zlibDownload({ id: '333', hash: 'ghi', meta: { title: 'Blocked' } });
+					assert.equal(res.ok, false, 'html: ok false');
+					assert.equal(res.status, STATUS_ERROR, 'html: status error');
+					assert.equal(res.body, null, 'html: no body returned');
+					assert.match(res.message, /验证|HTML|网页|文件|失败/, 'html: Chinese rejection message');
+					return res;
+				});
+				assertNoCredentialLeak(lines);
+				assertNoCredentialsIn(result);
+			}
+		);
+	} finally {
+		await fxEpub.close();
+		await fxHtml.close();
+	}
+}
+
+// ── T4.4: truncated CDN response rejected ────────────────────────────────────
+{
+	const fx = await startFakeEapi({ cdnMode: 'truncated' });
+	try {
+		await temporaryEnv(
+			{ ZLIB_EMAIL: FAKE_EMAIL, ZLIB_PASSWORD: FAKE_PASSWORD, ZLIB_DOMAIN: fx.base },
+			async () => {
+				const { result, lines } = await captureConsole(async () => {
+					const res = await zlibDownload({ id: '444', hash: 'jkl', meta: { title: 'Truncated' } });
+					assert.equal(res.ok, false, 'truncated: ok false');
+					assert.equal(res.status, STATUS_ERROR, 'truncated: status error');
+					assert.equal(res.body, null, 'truncated: no bytes returned');
+					assert.match(res.message, /截断|失败|下载/, 'truncated: Chinese rejection message');
+					return res;
+				});
+				assertNoCredentialLeak(lines);
+				assertNoCredentialsIn(result);
+			}
+		);
+	} finally {
+		await fx.close();
+	}
+}
+
+// ── T4.5: saveZlibFile writes under zlib/, idempotent, no overwrite ───────────
+{
+	const dir = await mkdtemp(join(tmpdir(), 'zlib-save-'));
+	try {
+		const bodyA = Buffer.from('%PDF-1.4 zlib-A ' + 'a'.repeat(48), 'latin1');
+		const bodyB = Buffer.from('%PDF-1.4 zlib-B ' + 'b'.repeat(48), 'latin1');
+		const first = await saveZlibFile(dir, 'Test Book.pdf', bodyA);
+		assert.equal(first.ok, true, 'save: ok true');
+		assert.equal(first.status, 'downloaded', 'save: status downloaded');
+		assert.match(first.path.replaceAll('\\', '/'), /\/zlib\/Test Book\.pdf$/, 'save: written under zlib/');
+		assert.deepEqual(await readFile(first.path), bodyA, 'save: bytes written');
+
+		const again = await saveZlibFile(dir, 'Test Book.pdf', bodyA);
+		assert.equal(again.path, first.path, 'save: identical re-run is idempotent');
+
+		const diff = await saveZlibFile(dir, 'Test Book.pdf', bodyB);
+		assert.match(diff.path.replaceAll('\\', '/'), /\/zlib\/Test Book \(2\)\.pdf$/, 'save: different bytes get (2) suffix');
+		assert.deepEqual(await readFile(diff.path), bodyB, 'save: original bytes preserved');
+	} finally {
+		await rm(dir, { recursive: true, force: true });
 	}
 }
 
