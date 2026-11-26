@@ -1062,8 +1062,8 @@ assert.equal(STATUS_QUOTA_EXHAUSTED, 'quota_exhausted');
 		assert.match(loc.meta.title, /Z-Library/, `${lang}.meta.title mentions Z-Library`);
 	}
 
-	// T6.3 — packaging manifest: 0.6.0, both new tests, lib/, keyword, description.
-	assert.equal(pkg.version, '0.6.0', 'package.json version is 0.6.0');
+	// T6.3 — packaging manifest: 0.6.1, both new tests, lib/, keyword, description.
+	assert.equal(pkg.version, '0.6.1', 'package.json version is 0.6.1');
 	for (const path of ['test-zlib.mjs', 'test-http-methods.mjs', 'lib']) {
 		assert.ok(Array.isArray(pkg.files) && pkg.files.includes(path), `package.json files includes ${path}`);
 	}

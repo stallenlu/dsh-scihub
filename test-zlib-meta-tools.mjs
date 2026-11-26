@@ -109,3 +109,61 @@ async function runSuite() {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
 	await runSuite();
 }
+
+// ── Task 6: documentation / locale / version assertions (APPEND-ONLY, R2) ──
+// This block is appended; no Task 5 assertion above was rewritten or removed.
+async function runDocAssertions() {
+	const { readFileSync } = await import('node:fs');
+	const root = new URL('.', import.meta.url);
+	const read = (rel) => readFileSync(new URL(rel, root), 'utf8');
+
+	const readme = read('README.md');
+	const en = JSON.parse(read('locale/en.json'));
+	const zh = JSON.parse(read('locale/zh.json'));
+	const pkg = JSON.parse(read('package.json'));
+
+	// all four zlib_meta_* tools are documented
+	for (const name of META_TOOLS) {
+		assert.ok(readme.includes(name), `README must document ${name}`);
+	}
+
+	// acknowledgement block markers stay verbatim (USER.md hard requirement)
+	for (const marker of ['heartleo/zlib', 'MIT', 'UNOFFICIAL', 'not affiliated']) {
+		assert.ok(readme.includes(marker), `README acknowledgement must keep \`${marker}\``);
+	}
+
+	// metadata subsection: workflow, formats, refusal and byte-safety
+	for (const marker of [
+		'本地电子书元数据', 'zlib_meta_read', 'zlib_meta_lookup',
+		'zlib_meta_preview', 'zlib_meta_commit', 'EPUB', 'PDF',
+		'加密', '原始字节', '5 分钟',
+	]) {
+		assert.ok(readme.includes(marker), `README metadata section must mention \`${marker}\``);
+	}
+	for (const field of [
+		'title', 'authors', 'publisher', 'language', 'tags',
+		'series', 'index', 'isbn', 'date', 'description',
+	]) {
+		assert.ok(readme.includes(field), `README metadata section must list field \`${field}\``);
+	}
+
+	// locale descriptions mention metadata
+	assert.match(en.meta.description, /metadata/i, 'en locale description must mention metadata');
+	assert.match(zh.meta.description, /元数据/, 'zh locale description must mention metadata');
+
+	// package version and the four new test files
+	assert.equal(pkg.version, '0.6.1', 'package.json version must be 0.6.1');
+	for (const file of [
+		'test-ebookmeta.mjs', 'test-metasource.mjs',
+		'test-zlib-meta.mjs', 'test-zlib-meta-tools.mjs',
+	]) {
+		assert.ok(Array.isArray(pkg.files) && pkg.files.includes(file),
+			`package.json files must include ${file}`);
+	}
+
+	console.log('test-zlib-meta-tools: doc assertions ALL PASS');
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+	await runDocAssertions();
+}

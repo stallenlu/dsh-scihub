@@ -1,6 +1,6 @@
 # dsh-scihub
 
-DeepSeek Harness 插件：`scihub_pdf` / `scihub_batch` 按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF；`libgen_search` / `libgen_download` 用关键词检索 Library Genesis 并按 MD5 下载书籍或文献；0.6.0 起新增九个 `zlib_*` 工具，用账号会话从 Z-Library 搜索、查看详情、下载电子书，以及查看收藏、历史、配额与域名诊断。文件保存到当前会话工作区，并按引用/命中元数据起人类可读的统一名字。
+DeepSeek Harness 插件：`scihub_pdf` / `scihub_batch` 按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF；`libgen_search` / `libgen_download` 用关键词检索 Library Genesis 并按 MD5 下载书籍或文献；0.6.0 起新增九个 `zlib_*` 工具，用账号会话从 Z-Library 搜索、查看详情、下载电子书，以及查看收藏、历史、配额与域名诊断；0.6.1 起新增四个 `zlib_meta_*` 工具，可读取本地电子书元数据、联网查书目、预览字段差异并用一次性令牌提交写回。文件保存到当前会话工作区，并按引用/命中元数据起人类可读的统一名字。
 
 > Sci-Hub 与 Library Genesis 都是影子图书馆，其可用性与合法性因司法辖区而异。Z-Library 属于账号制资源库，请自行确认当地法规与平台条款。插件只如实报告它实际拿到了什么，不会把失败包装成成功。
 
@@ -18,15 +18,15 @@ DeepSeek Harness 插件：`scihub_pdf` / `scihub_batch` 按 **DOI 或 URL** 从 
 
 | 渠道 | 状态 / 地址 |
 |---|---|
-| **npm 包** | `dsh-scihub@0.6.0` → https://www.npmjs.com/package/dsh-scihub |
-| **GitHub Release 预构建包** | `v0.6.0` 附 `dsh-scihub-0.6.0.tgz` → https://github.com/stallenlu/dsh-scihub/releases/tag/v0.6.0 |
+| **npm 包** | `dsh-scihub@0.6.1` → https://www.npmjs.com/package/dsh-scihub |
+| **GitHub Release 预构建包** | `v0.6.1` 附 `dsh-scihub-0.6.1.tgz` → https://github.com/stallenlu/dsh-scihub/releases/tag/v0.6.1 |
 | **dshmarket 插件市场** | 已收录进官方目录（收录 PR [#12966](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/12966) 已合并），在 Plugins → Plugin Market 搜索 `dsh-scihub` 即可一键安装 |
 
 目录会优先使用已发布的 npm 包，其次作者提供的 Release 预构建 tarball，最后回退到整仓 GitHub 源码。仓库已加 `dsh-plugin` topic，`package.json` 声明 `dsh.bundle` 且 `repository` 指回本仓库，根目录 `cordis.patch.yml` 含 `- insert:` —— 这些是目录投稿的硬性要求。
 
 ## 提供的能力
 
-注册十四个模型工具（三个 Sci-Hub、两个 LibGen、九个 Z-Library），外加多处横切能力。按版本累计如下，后面各节展开说明：
+注册十八个模型工具（三个 Sci-Hub、两个 LibGen、九个 Z-Library、四个本地元数据），外加多处横切能力。按版本累计如下，后面各节展开说明：
 
 | 能力 | 工具 / 机制 | 首见于 |
 |---|---|---|
@@ -37,6 +37,7 @@ DeepSeek Harness 插件：`scihub_pdf` / `scihub_batch` 按 **DOI 或 URL** 从 
 | 有界并发批量 / 死镜像跳过 / 截断与验证墙拒绝 | 批量 worker + `truncationReason()` + `isChallenge()` | 0.5.2 |
 | 镜像自愈（重测候选、踢死换活、写回即生效） | `scihub_refresh_mirrors` | 0.5.3 |
 | Z-Library 搜索 / 详情 / 下载 / 收藏 / 历史 / 配额 / 域名诊断 | 九个 `zlib_*` 工具 | 0.6.0 |
+| 本地电子书元数据读 / 查 / 预览 / 提交 | 四个 `zlib_meta_*` 工具 | 0.6.1 |
 
 ### `scihub_pdf` — 单篇
 
@@ -162,6 +163,26 @@ LibGen 与 Sci-Hub 的用法不同：Sci-Hub 是「已知 DOI → 直接拿 PDF�
 
 > 下载前会用账户配额概要做检查；配额未知时不当作耗尽处理。
 
+### 本地电子书元数据（0.6.1 起）
+
+四个 `zlib_meta_*` 工具给**已经下载到本地**的电子书读改书目元数据：只读文件、不联网除非显式查书目，且把「预览」与「提交」拆成两步，避免误写。流程为 **read → lookup → preview → commit**：
+
+1. `zlib_meta_read`（参数 `path`）→ 从本地文件读出当前元数据。
+2. `zlib_meta_lookup`（参数 `title` / `author` / `isbn`，任选其一或组合）→ 联网查书目候选，供你挑选要套用的字段。
+3. `zlib_meta_preview`（参数 `path` / `fields` / `rename`）→ 不改文件，返回**字段级差异**（field-level diff）与一个**一次性令牌**；令牌有效期 **5 分钟**，超时即失效。
+4. `zlib_meta_commit`（参数 `token`）→ 凭 preview 给的一次性令牌提交写回；令牌错误、过期或文件在预览后被改动都会拒绝提交。
+
+可编辑字段约十个：`title`、`authors`、`publisher`、`language`、`tags`、`series`、`index`、`isbn`、`date`、`description`。`rename` 控制是否按新 `title` 同步重命名文件。
+
+支持范围与安全性：
+
+- **仅支持 EPUB 与 PDF** 两种格式；其它格式直接拒绝。
+- **加密 PDF 一律拒绝**：无法在不破坏内容的前提下可靠改写元数据。
+- **写回是原子的**：提交失败（令牌失效 / 文件被改动 / 写入出错）时，**原始字节不变**——要么整份写成功，要么一个字节都不动。
+- 全程零第三方依赖，凭证依旧只从环境变量读取，不进工具参数。
+
+> 这四个工具与致谢声明里提到的 `heartleo/zlib` 一样，仅参考其公开协议设计、以纯 `node:` 实现，并非官方客户端；法律与非官方声明见文首「致谢与法律声明」。
+
 ## 文件名：人类可读的统一命名
 
 0.4.1 起，下载的文件不再一律叫 `10.1038_nature12373.pdf`，而是用 Sci-Hub 文章页 / LibGen 命中里**真实存在**的引用或书目元数据套模板，默认：
@@ -285,7 +306,7 @@ Sci-Hub 镜像会随网络/辖区频繁失效、或被 Cloudflare 验证墙拦�
 dsh plugin --profile web add dsh-scihub
 
 # GitHub Release 预构建 tarball
-dsh plugin --profile web add https://github.com/stallenlu/dsh-scihub/releases/download/v0.6.0/dsh-scihub-0.6.0.tgz
+dsh plugin --profile web add https://github.com/stallenlu/dsh-scihub/releases/download/v0.6.1/dsh-scihub-0.6.1.tgz
 
 # 整仓源码
 dsh plugin --profile web add github:stallenlu/dsh-scihub
@@ -298,10 +319,10 @@ dsh plugin --profile web add github:stallenlu/dsh-scihub
 在 DSH 会话里也可以直接用 `plugin_manager` 把官方 npm 版本装进当前 profile：
 
 ```bash
-plugin_manager install_bundle target=dsh-scihub@0.6.0
+plugin_manager install_bundle target=dsh-scihub@0.6.1
 ```
 
-把 `0.6.0` 换成想安装的版本号即可。这与 `dsh plugin --profile <profile> add dsh-scihub` 等价，来源是 npm registry 上已发布的正式包，不依赖任何本地目录。npm 包自带 `cordis.patch.yml`（含 `- insert:` 行），安装后会自动注入 profile 的层栈，**无需**手工在 profile 的 `cordis.patch.yml` 里添加 `- insert:` 块。
+把 `0.6.1` 换成想安装的版本号即可。这与 `dsh plugin --profile <profile> add dsh-scihub` 等价，来源是 npm registry 上已发布的正式包，不依赖任何本地目录。npm 包自带 `cordis.patch.yml`（含 `- insert:` 行），安装后会自动注入 profile 的层栈，**无需**手工在 profile 的 `cordis.patch.yml` 里添加 `- insert:` 块。
 
 > 不要用 `link:<本地目录>` 或 `target=<本目录绝对路径>` 之类的本地源码装法：本地目录一旦被移动或删除，DSH 重启后会报「包不可用 / `dsh: cannot resolve profile bundle "dsh-scihub"`」。指定官方版本号 `dsh-scihub@<version>` 才能一劳永逸。
 
@@ -333,11 +354,12 @@ node test-optimizations.mjs                  # 离线：并发保序 / 死镜像
 node test-refresh.mjs                        # 离线：镜像重测写回 / 全死保留旧表 / 自愈工具注册
 node test-http-methods.mjs                   # 离线：httpGet 方法扩展 / 自定义头与 body / 响应头回传
 node test-zlib.mjs                           # 离线：Z-Library EAPI 登录/搜索/下载/工具注册/文档致谢
+node test-zlib-meta-tools.mjs                # 离线：四个 zlib_meta_* 工具注册/零凭证/渲染 + 文档/致谢/版本断言
 node test-smoke.mjs                          # 默认 10.1038/nature12373（需联网）
 node test-smoke.mjs 10.1103/PhysRevLett.116.061102
 ```
 
-`test-naming.mjs` 完全离线，只测引用元数据解析、命名模板、文件名清洗与旧名回退，适合 CI。`test-integration.mjs` 用本地假 Sci-Hub 镜像离线覆盖工具注册、命名各分支、并发原子写与 AbortSignal 不泄漏；`test-libgen.mjs` 用本地假 LibGen 镜像离线覆盖结果表解析、检索状态、按 MD5 下载、扩展名保真、Referer、HTML/截断拒绝与去重；`test-proxy.mjs` 用本地假 CONNECT 代理离线覆盖 `resolveProxyUrl` 优先级、`NO_PROXY` 豁免、隧道内 GET / Referer / UA、重定向二次建隧道、代理拒绝、`config.proxy` 接线与 AbortSignal 不累积。`test-optimizations.mjs` 用可编程的本地假镜像离线覆盖批量有界并发且保序、死镜像按 worker 数去重、通用 Cloudflare 文案判 `challenge`，并直接单测 `truncationReason()`。`test-refresh.mjs` 用本地假镜像离线覆盖镜像自愈：候选探测后只写回实测能下到 PDF 的镜像（按速度排序）、全死时保留旧表不改文件，以及 `scihub_refresh_mirrors` 工具注册与人类可读输出。`test-http-methods.mjs` 离线覆盖 `httpGet` 的方法 / 自定义头 / body / 响应头扩展（保持旧签名向后兼容）；`test-zlib.mjs` 离线覆盖 Z-Library 的登录与失效、搜索/详情/配额/收藏/历史、下载剥凭证头与命名落盘、九个工具注册与零凭证字段，以及 README/locale/manifest 的致谢与版本断言。`test-smoke.mjs` 是一条需要联网的最小端到端检查，覆盖五种输入、五种非法输入，以及批量模式：
+`test-naming.mjs` 完全离线，只测引用元数据解析、命名模板、文件名清洗与旧名回退，适合 CI。`test-integration.mjs` 用本地假 Sci-Hub 镜像离线覆盖工具注册、命名各分支、并发原子写与 AbortSignal 不泄漏；`test-libgen.mjs` 用本地假 LibGen 镜像离线覆盖结果表解析、检索状态、按 MD5 下载、扩展名保真、Referer、HTML/截断拒绝与去重；`test-proxy.mjs` 用本地假 CONNECT 代理离线覆盖 `resolveProxyUrl` 优先级、`NO_PROXY` 豁免、隧道内 GET / Referer / UA、重定向二次建隧道、代理拒绝、`config.proxy` 接线与 AbortSignal 不累积。`test-optimizations.mjs` 用可编程的本地假镜像离线覆盖批量有界并发且保序、死镜像按 worker 数去重、通用 Cloudflare 文案判 `challenge`，并直接单测 `truncationReason()`。`test-refresh.mjs` 用本地假镜像离线覆盖镜像自愈：候选探测后只写回实测能下到 PDF 的镜像（按速度排序）、全死时保留旧表不改文件，以及 `scihub_refresh_mirrors` 工具注册与人类可读输出。`test-http-methods.mjs` 离线覆盖 `httpGet` 的方法 / 自定义头 / body / 响应头扩展（保持旧签名向后兼容）；`test-zlib.mjs` 离线覆盖 Z-Library 的登录与失效、搜索/详情/配额/收藏/历史、下载剥凭证头与命名落盘、九个工具注册与零凭证字段，以及 README/locale/manifest 的致谢与版本断言。`test-zlib-meta-tools.mjs` 离线覆盖四个元数据工具的注册（共 18 个工具）、零凭证参数、人类可读渲染，并追加文档/locale/package 的断言（四个工具名、致谢标记、元数据小节、版本 0.6.1 与四个新测试文件）。`test-smoke.mjs` 是一条需要联网的最小端到端检查，覆盖五种输入、五种非法输入，以及批量模式：
 
 - `doi`（doi.org 链接，须归一化成裸 DOI）
 - `url` 自带 DOI

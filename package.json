@@ -1,6 +1,6 @@
 {
   "name": "dsh-scihub",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/stallenlu/dsh-scihub.git"
@@ -33,7 +33,11 @@
     "test-optimizations.mjs",
     "test-refresh.mjs",
     "test-zlib.mjs",
-    "test-http-methods.mjs"
+    "test-http-methods.mjs",
+    "test-ebookmeta.mjs",
+    "test-metasource.mjs",
+    "test-zlib-meta.mjs",
+    "test-zlib-meta-tools.mjs"
   ],
   "engines": {
     "node": ">=22"
