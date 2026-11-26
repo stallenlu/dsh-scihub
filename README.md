@@ -356,12 +356,15 @@ node test-optimizations.mjs                  # 离线：并发保序 / 死镜像
 node test-refresh.mjs                        # 离线：镜像重测写回 / 全死保留旧表 / 自愈工具注册
 node test-http-methods.mjs                   # 离线：httpGet 方法扩展 / 自定义头与 body / 响应头回传
 node test-zlib.mjs                           # 离线：Z-Library EAPI 登录/搜索/下载/工具注册/文档致谢
+node test-ebookmeta.mjs                      # 离线：EPUB/PDF 元数据读写、加密拒绝、原子写与夹具回读
+node test-metasource.mjs                     # 离线：Open Library / Google Books 查源、部分失败与书目原文
+node test-zlib-meta.mjs                      # 离线：预览令牌 5 分钟/一次性、文件变动拒绝提交
 node test-zlib-meta-tools.mjs                # 离线：四个 zlib_meta_* 工具注册/零凭证/渲染 + 文档/致谢/版本断言
 node test-smoke.mjs                          # 默认 10.1038/nature12373（需联网）
 node test-smoke.mjs 10.1103/PhysRevLett.116.061102
 ```
 
-`test-naming.mjs` 完全离线，只测引用元数据解析、命名模板、文件名清洗与旧名回退，适合 CI。`test-integration.mjs` 用本地假 Sci-Hub 镜像离线覆盖工具注册、命名各分支、并发原子写与 AbortSignal 不泄漏；`test-libgen.mjs` 用本地假 LibGen 镜像离线覆盖结果表解析、检索状态、按 MD5 下载、扩展名保真、Referer、HTML/截断拒绝与去重；`test-proxy.mjs` 用本地假 CONNECT 代理离线覆盖 `resolveProxyUrl` 优先级、`NO_PROXY` 豁免、隧道内 GET / Referer / UA、重定向二次建隧道、代理拒绝、`config.proxy` 接线与 AbortSignal 不累积。`test-optimizations.mjs` 用可编程的本地假镜像离线覆盖批量有界并发且保序、死镜像按 worker 数去重、通用 Cloudflare 文案判 `challenge`，并直接单测 `truncationReason()`。`test-refresh.mjs` 用本地假镜像离线覆盖镜像自愈：候选探测后只写回实测能下到 PDF 的镜像（按速度排序）、全死时保留旧表不改文件，以及 `scihub_refresh_mirrors` 工具注册与人类可读输出。`test-http-methods.mjs` 离线覆盖 `httpGet` 的方法 / 自定义头 / body / 响应头扩展（保持旧签名向后兼容）；`test-zlib.mjs` 离线覆盖 Z-Library 的登录与失效、搜索/详情/配额/收藏/历史、下载剥凭证头与命名落盘、九个工具注册与零凭证字段，以及 README/locale/manifest 的致谢与版本断言。`test-zlib-meta-tools.mjs` 离线覆盖四个元数据工具的注册（共 18 个工具）、零凭证参数、人类可读渲染，并追加文档/locale/package 的断言（四个工具名、致谢标记、元数据小节、版本 0.6.1 与四个新测试文件）。`test-smoke.mjs` 是一条需要联网的最小端到端检查，覆盖五种输入、五种非法输入，以及批量模式：
+`test-naming.mjs` 完全离线，只测引用元数据解析、命名模板、文件名清洗与旧名回退，适合 CI。`test-integration.mjs` 用本地假 Sci-Hub 镜像离线覆盖工具注册、命名各分支、并发原子写与 AbortSignal 不泄漏；`test-libgen.mjs` 用本地假 LibGen 镜像离线覆盖结果表解析、检索状态、按 MD5 下载、扩展名保真、Referer、HTML/截断拒绝与去重；`test-proxy.mjs` 用本地假 CONNECT 代理离线覆盖 `resolveProxyUrl` 优先级、`NO_PROXY` 豁免、隧道内 GET / Referer / UA、重定向二次建隧道、代理拒绝、`config.proxy` 接线与 AbortSignal 不累积。`test-optimizations.mjs` 用可编程的本地假镜像离线覆盖批量有界并发且保序、死镜像按 worker 数去重、通用 Cloudflare 文案判 `challenge`，并直接单测 `truncationReason()`。`test-refresh.mjs` 用本地假镜像离线覆盖镜像自愈：候选探测后只写回实测能下到 PDF 的镜像（按速度排序）、全死时保留旧表不改文件，以及 `scihub_refresh_mirrors` 工具注册与人类可读输出。`test-http-methods.mjs` 离线覆盖 `httpGet` 的方法 / 自定义头 / body / 响应头扩展（保持旧签名向后兼容）；`test-zlib.mjs` 离线覆盖 Z-Library 的登录与失效、搜索/详情/配额/收藏/历史、下载剥凭证头与命名落盘、九个工具注册与零凭证字段，以及 README/locale/manifest 的致谢与版本断言。`test-ebookmeta.mjs` 用自生成 EPUB/PDF 夹具离线覆盖按内容嗅探的元数据读写、加密 PDF 拒绝、原子写与写后回读；`test-metasource.mjs` 覆盖两个开放书目源的查询、单源失败隔离与书目文本原样返回；`test-zlib-meta.mjs` 覆盖预览令牌 5 分钟有效、一次性消费、以及预览后文件被改动时拒绝提交且保留改动字节；`test-zlib-meta-tools.mjs` 离线覆盖四个元数据工具的注册（共 18 个工具）、零凭证参数、人类可读渲染，并追加文档/locale/package 的断言（四个工具名、致谢标记、元数据小节、版本 0.6.1 与四个新测试文件）。`test-smoke.mjs` 是一条需要联网的最小端到端检查，覆盖五种输入、五种非法输入，以及批量模式：
 
 - `doi`（doi.org 链接，须归一化成裸 DOI）
 - `url` 自带 DOI
