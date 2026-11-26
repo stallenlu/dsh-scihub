@@ -10,13 +10,18 @@
  * Node built-ins only. No network, no credentials, no child_process.
  */
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { crc32, deflateRawSync } from 'node:zlib';
 
-import { MetaError, detectFormat, readMeta } from './lib/ebookmeta.mjs';
+import * as ebookmeta from './lib/ebookmeta.mjs';
+
+const { MetaError, detectFormat, readMeta } = ebookmeta;
+// Task 2 exports are intentionally resolved through the namespace so that the
+// RED phase reports clean "missing feature" assertions instead of a link error.
+const { writeMeta, renameByMeta } = ebookmeta;
 
 /* ------------------------------------------------------------------ *
  * Small, standards-shaped ZIP writer (EPUB is a ZIP container).
@@ -209,6 +214,35 @@ export function buildPdfFixture(path, fields = {}) {
   return path;
 }
 
+/**
+ * Write an encrypted-shaped PDF (a `/Encrypt` reference in its trailer),
+ * used to verify that writeMeta refuses encrypted files without touching bytes.
+ * @param {string} path destination file
+ * @returns {string} the same path, for convenient chaining
+ */
+export function buildEncryptedPdfFixture(path) {
+  mkdirSync(dirname(path), { recursive: true });
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [] /Count 0 >>',
+    '<< /Title (Locked) >>',
+    '<< /Filter /Standard /V 1 /R 2 /O () /U () /P -4 >>',
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offsets = [];
+  for (let i = 0; i < objects.length; i++) {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xrefOffset = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const off of offsets) pdf += `${String(off).padStart(10, '0')} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info 3 0 R /Encrypt 4 0 R >>\n`;
+  pdf += `startxref\n${xrefOffset}\n%%EOF\n`;
+  writeFileSync(path, pdf, 'latin1');
+  return path;
+}
+
 /* ------------------------------------------------------------------ *
  * Assertions — direct execution only (controller ruling R1).
  * ------------------------------------------------------------------ */
@@ -300,6 +334,102 @@ async function runSuite() {
     assert.ok(metaError instanceof Error);
     assert.equal(metaError.name, 'MetaError');
     assert.equal(metaError.code, 'write_failed');
+
+    // --- Task 2: write path / atomicity / rename -------------------------------
+
+    // 8) EPUB round-trip: write replaces dc:* values, file stays a valid ZIP.
+    const epubWritePath = buildEpubFixture(join(dir, 'write.epub'), {
+      title: 'Old Title',
+      authors: ['Old Author'],
+      language: 'en',
+    });
+    const epubWrite = await writeMeta(epubWritePath, {
+      title: 'New Title',
+      authors: ['A. Author'],
+    });
+    assert.equal(epubWrite.ok, true, `EPUB write failed: ${epubWrite.message}`);
+    assert.equal(typeof epubWrite.bytes, 'number');
+    assert.ok(epubWrite.bytes > 0);
+    const epubAfter = await readMeta(epubWritePath);
+    assert.equal(epubAfter.ok, true, `EPUB unreadable after write: ${epubAfter.message}`);
+    assert.equal(epubAfter.fields.title, 'New Title');
+    assert.deepEqual(epubAfter.fields.authors, ['A. Author']);
+    // Untouched dc:* value survives the merge.
+    assert.equal(epubAfter.fields.language, 'en');
+
+    // 9) PDF round-trip: incremental update keeps original bytes as a prefix.
+    const pdfWritePath = buildPdfFixture(join(dir, 'write.pdf'), {
+      title: 'Old Paper',
+      authors: ['Old Author'],
+    });
+    const pdfOriginal = readFileSync(pdfWritePath);
+    const pdfWrite = await writeMeta(pdfWritePath, { title: 'New Paper' });
+    assert.equal(pdfWrite.ok, true, `PDF write failed: ${pdfWrite.message}`);
+    const pdfNew = readFileSync(pdfWritePath);
+    assert.ok(pdfNew.length > pdfOriginal.length, 'incremental update must append');
+    assert.ok(pdfNew.subarray(0, pdfOriginal.length).equals(pdfOriginal),
+      'original PDF bytes must be a strict prefix of the updated file');
+    const pdfAfter = await readMeta(pdfWritePath);
+    assert.equal(pdfAfter.ok, true, `PDF unreadable after write: ${pdfAfter.message}`);
+    assert.equal(pdfAfter.fields.title, 'New Paper');
+
+    // 10) Encrypted PDF: typed error and byte-identical file.
+    const encryptedPath = buildEncryptedPdfFixture(join(dir, 'locked.pdf'));
+    const encryptedBefore = readFileSync(encryptedPath);
+    const encryptedResult = await writeMeta(encryptedPath, { title: 'Should Not Apply' });
+    assert.equal(encryptedResult.ok, false);
+    assert.equal(encryptedResult.code, 'encrypted_pdf');
+    assert.ok(readFileSync(encryptedPath).equals(encryptedBefore),
+      'encrypted PDF must remain byte-identical');
+
+    // 11) Unwritable directory: error, no temp leak, original bytes unchanged.
+    const roDir = mkdtempSync(join(tmpdir(), 'ebookmeta-ro-'));
+    try {
+      const roPath = join(roDir, 'readonly.epub');
+      buildEpubFixture(roPath, { title: 'Untouched' });
+      const roBefore = readFileSync(roPath);
+      if (process.platform !== 'win32') {
+        chmodSync(roDir, 0o500);
+        try {
+          const roResult = await writeMeta(roPath, { title: 'Nope' });
+          assert.equal(roResult.ok, false);
+          assert.ok(readFileSync(roPath).equals(roBefore),
+            'original bytes unchanged after failed atomic write');
+          assert.deepEqual(readdirSync(roDir).filter((n) => n.endsWith('.tmp')), [],
+            'no .tmp file may be left behind');
+        } finally {
+          chmodSync(roDir, 0o700);
+        }
+      } else {
+        console.log('  [skip] read-only directory test on Windows (chmod not enforced)');
+      }
+    } finally {
+      rmSync(roDir, { recursive: true, force: true });
+    }
+
+    // 12) renameByMeta success: sanitized "{title} — authors", same dir + ext.
+    const renameSrc = buildEpubFixture(join(dir, 'rename-me.epub'), { title: 'Old' });
+    const renamed = await renameByMeta(renameSrc, {
+      title: 'A/B: Title?', authors: ['Doe, Jane'],
+    });
+    assert.equal(renamed.ok, true, `rename failed: ${renamed.message}`);
+    assert.equal(dirname(renamed.path), dir);
+    assert.match(renamed.path, /\.epub$/);
+    assert.equal(renamed.path, join(dir, 'A B Title — Doe, Jane.epub'));
+    assert.equal((await readMeta(renamed.path)).fields.title, 'A/B: Title?');
+
+    // 13) renameByMeta refuses to overwrite an existing target.
+    const collideSrc = buildPdfFixture(join(dir, 'collide.pdf'), { title: 'Source' });
+    const collideDst = join(dir, 'Taken — Author.pdf');
+    writeFileSync(collideDst, 'existing target must survive');
+    const collide = await renameByMeta(collideSrc, { title: 'Taken', authors: ['Author'] });
+    assert.equal(collide.ok, false);
+    assert.ok(readFileSync(collideDst).toString() === 'existing target must survive');
+    assert.ok(readFileSync(collideSrc).length > 0, 'source file must remain intact');
+
+    // No temp files left in the main fixture directory either.
+    assert.deepEqual(readdirSync(dir).filter((n) => n.endsWith('.tmp')), [],
+      'no .tmp files may remain after all writes');
 
     console.log('test-ebookmeta: ALL PASS');
   } finally {
