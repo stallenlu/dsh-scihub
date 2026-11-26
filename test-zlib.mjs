@@ -878,4 +878,166 @@ assert.equal(STATUS_QUOTA_EXHAUSTED, 'quota_exhausted');
 	}
 }
 
+// ═════════════════════════ T5: host tool wiring (schemas / renders) ══════════
+// Appended after the T2/T3/T4 blocks above; nothing earlier is rewritten.
+// Dynamic import keeps the original import line at the top of the file intact.
+{
+	const { apply, STATUS_LABELS = {} } = await import('./lib/host.mjs');
+
+	const ZLIB_TOOL_NAMES = [
+		'zlib_status', 'zlib_search', 'zlib_get_book', 'zlib_download',
+		'zlib_profile', 'zlib_saved', 'zlib_history', 'zlib_check_domains',
+		'zlib_delete_history',
+	];
+	const FORBIDDEN_SCHEMA_KEYS = ['email', 'password', 'cookie', 'userkey', 'userid'];
+	const NEW_LABEL_STATUSES = ['not_configured', 'session_expired', 'domain_unreachable', 'quota_exhausted'];
+
+	/** Recursive key scan: a credential-shaped property must not hide anywhere. */
+	function schemaKeys(node, out = new Set()) {
+		if (Array.isArray(node)) {
+			for (const value of node) schemaKeys(value, out);
+		} else if (node && typeof node === 'object') {
+			for (const [key, value] of Object.entries(node)) {
+				out.add(key.toLowerCase());
+				schemaKeys(value, out);
+			}
+		}
+		return out;
+	}
+
+	function rendered(tool, value) {
+		const parts = tool.output.render({}, value);
+		assert.ok(Array.isArray(parts) && parts[0] && typeof parts[0].text === 'string', 'render returns text');
+		return parts[0].text;
+	}
+
+	function assertHuman(text, label) {
+		assert.match(text, /[\u4e00-\u9fff]/, `${label}: render must be Chinese`);
+		assert.ok(!text.includes('"success"'), `${label}: no raw envelope`);
+		assert.ok(!text.includes('"data"'), `${label}: no raw data dump`);
+		assertNoCredentialsIn(text);
+	}
+
+	const tmpT5 = await mkdtemp(join(tmpdir(), 'zlib-t5-'));
+	try {
+		// T5.2 — mock ctx (test-integration.mjs:61 blueprint): all nine tools register.
+		const registered = {};
+		const ctx = {
+			tools: { register(def) { registered[def.name] = def; } },
+			get(name) { return name === 'workingDirectory' ? { defaultDirectory: tmpT5 } : undefined; },
+		};
+		apply(ctx, {});
+
+		// T5.2 — mock ctx: all nine tools register (RED before implementation).
+		for (const name of ZLIB_TOOL_NAMES) assert.ok(registered[name], `tool ${name} registered by apply()`);
+
+		// T5.1 — four new STATUS_LABELS with distinct, actionable Chinese guidance.
+		for (const status of NEW_LABEL_STATUSES) {
+			assert.equal(typeof STATUS_LABELS[status], 'string', `STATUS_LABELS.${status} exists`);
+			assert.match(STATUS_LABELS[status], /[\u4e00-\u9fff]/, `STATUS_LABELS.${status} is Chinese`);
+		}
+		assert.equal(new Set(NEW_LABEL_STATUSES.map((s) => STATUS_LABELS[s])).size, 4, 'four distinct labels');
+		assert.match(STATUS_LABELS.not_configured, /环境变量/, 'not_configured guidance: configure env');
+		assert.match(STATUS_LABELS.session_expired, /重新/, 'session_expired guidance: log in again');
+		assert.match(STATUS_LABELS.domain_unreachable, /域名/, 'domain_unreachable guidance: check domain');
+		assert.match(STATUS_LABELS.quota_exhausted, /配额/, 'quota_exhausted guidance: quota');
+
+		for (const name of ZLIB_TOOL_NAMES) {
+			const tool = registered[name];
+			assert.ok(tool.output && tool.output.schema && typeof tool.output.schema === 'object', `${name}: output.schema`);
+			assert.equal(typeof tool.output.render, 'function', `${name}: render`);
+			assert.equal(typeof tool.timeoutMs, 'number', `${name}: timeoutMs`);
+			assert.equal(typeof tool.isConcurrencySafe, 'function', `${name}: isConcurrencySafe`);
+			assert.equal(typeof tool.presentCall, 'function', `${name}: presentCall`);
+			assert.equal(typeof tool.execute, 'function', `${name}: execute`);
+
+			// T5.3 — recursive credential-free schema assertion (parameters + output).
+			for (const [which, schema] of [['parameters', tool.parameters], ['output.schema', tool.output.schema]]) {
+				const keys = schemaKeys(schema);
+				for (const forbidden of FORBIDDEN_SCHEMA_KEYS) {
+					assert.ok(!keys.has(forbidden), `${name}.${which} must not expose \`${forbidden}\``);
+				}
+			}
+		}
+
+		// T5.4 — synthetic renders for all four new failure classifications.
+		for (const status of NEW_LABEL_STATUSES) {
+			const text = rendered(registered.zlib_status, { ok: false, status, message: '测试说明' });
+			assertHuman(text, `status render ${status}`);
+			assert.ok(text.includes(STATUS_LABELS[status]), `${status}: render shows its own label`);
+		}
+
+		// T5.5 — happy path for every tool against the local fake EAPI.
+		const fakeOk = await startFakeEapi();
+		try {
+			await temporaryEnv(
+				{ ZLIB_EMAIL: FAKE_EMAIL, ZLIB_PASSWORD: FAKE_PASSWORD, ZLIB_DOMAIN: fakeOk.base },
+				async () => {
+					const cases = [
+						['zlib_status', {}],
+						['zlib_search', { query: 'Fake', limit: 5 }],
+						['zlib_get_book', { id: '1', hash: 'abc' }],
+						['zlib_download', { id: '1', hash: 'abc', title: 'Zlib Test Book', author: 'Ada Lovelace', year: '2020' }],
+						['zlib_profile', {}],
+						['zlib_saved', { page: 1 }],
+						['zlib_history', { page: 1 }],
+						['zlib_check_domains', {}],
+						['zlib_delete_history', { id: '7' }],
+					];
+					for (const [name, args] of cases) {
+						const tool = registered[name];
+						const result = await tool.execute(args, {});
+						assert.equal(result.ok, true, `${name}: happy path ok (${result.message})`);
+						const text = rendered(tool, result);
+						assertHuman(text, `${name} happy render`);
+					}
+					const dl = await registered.zlib_download.execute(
+						{ id: '1', hash: 'abc', title: 'Another Book', author: 'Grace Hopper', year: '2021' },
+						{}
+					);
+					assert.equal(dl.ok, true, 'download writes to disk');
+					assert.match(dl.path.replaceAll(/[\\/]/g, '/'), /\/zlib\//, 'download saved under zlib/');
+					assert.ok(dl.bytes > 0, 'download reports bytes');
+				}
+			);
+		} finally {
+			await fakeOk.close();
+		}
+
+		// T5.6 — failure classification for every credentialed tool: no env ⇒
+		// not_configured, human render, no credential text.
+		await temporaryEnv({}, async () => {
+			for (const name of ZLIB_TOOL_NAMES.filter((n) => n !== 'zlib_check_domains')) {
+				const tool = registered[name];
+				const args = name === 'zlib_get_book' || name === 'zlib_download'
+					? { id: '1', hash: 'abc' }
+					: name === 'zlib_delete_history' ? { id: '7' } : {};
+				const result = await tool.execute(args, {});
+				assert.equal(result.ok, false, `${name}: failure without env`);
+				assert.equal(result.status, 'not_configured', `${name}: classified not_configured`);
+				const text = rendered(tool, result);
+				assertHuman(text, `${name} failure render`);
+				assert.ok(text.includes(STATUS_LABELS.not_configured), `${name}: shows not_configured label`);
+			}
+		});
+
+		// T5.7 — domain_unreachable classification through the real check_domains path.
+		const fakeFail = await startFakeEapi({ rootMode: 'fail' });
+		try {
+			await temporaryEnv({ ZLIB_DOMAIN: fakeFail.base }, async () => {
+				const result = await registered.zlib_check_domains.execute({}, {});
+				assert.equal(result.ok, false, 'check_domains: unreachable');
+				assert.equal(result.status, 'domain_unreachable', 'check_domains: classified');
+				const text = rendered(registered.zlib_check_domains, result);
+				assertHuman(text, 'check_domains failure render');
+				assert.ok(text.includes(STATUS_LABELS.domain_unreachable), 'shows domain_unreachable label');
+			});
+		} finally {
+			await fakeFail.close();
+		}
+	} finally {
+		await rm(tmpT5, { recursive: true, force: true });
+	}
+}
+
 console.log('test-zlib: ALL PASS');
