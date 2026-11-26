@@ -16,11 +16,19 @@ import {
 	getSession,
 	eapiRequest,
 	zlibStatus,
+	zlibSearch,
+	zlibGetBook,
+	zlibProfile,
+	zlibSaved,
+	zlibHistory,
+	zlibDeleteHistory,
+	zlibCheckDomains,
 	STATUS_NOT_CONFIGURED,
 	STATUS_SESSION_EXPIRED,
 	STATUS_DOMAIN_UNREACHABLE,
 	STATUS_QUOTA_EXHAUSTED,
 	STATUS_ERROR,
+	STATUS_OK,
 } from './lib/zlib-api.mjs';
 
 // Test-only fake credentials. They are never printed, echoed or written to disk.
@@ -53,8 +61,8 @@ async function temporaryEnv(values, fn) {
 }
 
 /** Start a fake EAPI server. `state.expired`/`state.exhausted` can be flipped mid-test. */
-async function startFakeEapi({ expired = false, exhausted = false } = {}) {
-	const state = { expired, exhausted, logins: 0, requests: [] };
+async function startFakeEapi({ expired = false, exhausted = false, rootMode = 'ok' } = {}) {
+	const state = { expired, exhausted, rootMode, logins: 0, requests: [], deleted: [] };
 	const server = http.createServer((req, res) => {
 		const chunks = [];
 		req.on('data', (c) => chunks.push(c));
@@ -88,6 +96,59 @@ async function startFakeEapi({ expired = false, exhausted = false } = {}) {
 				if (state.expired) return send(400, { success: 0, error: 'Invalid credentials' });
 				if (state.exhausted) return send(200, { success: 1, quota: { limit: 5, used: 5 } });
 				return send(200, { success: 1, quota: { ...FAKE_QUOTA } });
+			}
+			// ── T3 routes (additive; T2 login/profile/expiry behavior untouched) ──
+			const h = req.headers;
+			const cookie = String(h.cookie || '');
+			const hasAuth =
+				h.source === 'android' &&
+				h['remix-userid'] === FAKE_USERID &&
+				h['remix-userkey'] === FAKE_USERKEY &&
+				cookie.includes(`remix_userid=${FAKE_USERID}`) &&
+				cookie.includes(`remix_userkey=${FAKE_USERKEY}`);
+
+			if (path === '/eapi/book/search' && req.method === 'POST') {
+				if (!hasAuth) return send(403, { success: 0, error: 'Access denied' });
+				const params = new URLSearchParams(bodyText);
+				const echoed = {};
+				for (const key of new Set(params.keys())) {
+					echoed[key] = key.endsWith('[]') ? params.getAll(key) : params.get(key);
+				}
+				return send(200, { success: 1, books: [{ id: '1', hash: 'abc', title: 'Fake Book' }], echoed });
+			}
+			const detailMatch = /^\/eapi\/book\/([^/]+)\/([^/]+)$/.exec(path);
+			if (detailMatch && req.method === 'GET') {
+				if (!hasAuth) return send(403, { success: 0, error: 'Access denied' });
+				return send(200, { success: 1, book: { id: detailMatch[1], hash: detailMatch[2], title: 'Fake Book' } });
+			}
+			if (path === '/eapi/user/book/saved' && req.method === 'GET') {
+				if (!hasAuth) return send(403, { success: 0, error: 'Access denied' });
+				const page = new URL(req.url, 'http://x').searchParams.get('page');
+				return send(200, { success: 1, books: [{ id: '42', title: 'Saved One' }], echoed: { page } });
+			}
+			if (path === '/eapi/user/book/downloaded' && req.method === 'GET') {
+				if (!hasAuth) return send(403, { success: 0, error: 'Access denied' });
+				const page = new URL(req.url, 'http://x').searchParams.get('page');
+				return send(200, { success: 1, books: [{ id: '43', title: 'Downloaded One' }], echoed: { page } });
+			}
+			const deleteMatch = /^\/eapi\/user\/book\/([^/]+)\/delete$/.exec(path);
+			if (deleteMatch && req.method === 'GET') {
+				if (!hasAuth) return send(403, { success: 0, error: 'Access denied' });
+				state.deleted.push(deleteMatch[1]);
+				return send(200, { success: 1, deleted: deleteMatch[1] });
+			}
+			// Domain probe target for zlibCheckDomains: lightweight HTML, no creds.
+			if (path === '/') {
+				if (rootMode === 'fail') {
+					res.writeHead(500, { 'content-type': 'text/html' });
+					return res.end('<html><body>server error</body></html>');
+				}
+				if (rootMode === 'challenge') {
+					res.writeHead(200, { 'content-type': 'text/html' });
+					return res.end('<html><head><title>Just a moment...</title></head><body>Checking your browser</body></html>');
+				}
+				res.writeHead(200, { 'content-type': 'text/html' });
+				return res.end('<html><body>Z-Library</body></html>');
 			}
 			if (path === '/eapi/test/fail') {
 				return send(418, { success: 0, error: '原始错误 Raw Error' });
@@ -347,5 +408,281 @@ assert.equal(STATUS_NOT_CONFIGURED, 'not_configured');
 assert.equal(STATUS_SESSION_EXPIRED, 'session_expired');
 assert.equal(STATUS_DOMAIN_UNREACHABLE, 'domain_unreachable');
 assert.equal(STATUS_QUOTA_EXHAUSTED, 'quota_exhausted');
+
+// ═════════════════════════ T3: read-class API tests ══════════════════════════
+// Every block below was appended after the T2 blocks above; nothing earlier is
+// rewritten. The shared helpers (temporaryEnv / startFakeEapi / captureConsole /
+// assertNoCredentialLeak / assertNoCredentialsIn) are reused as-is.
+
+// ── T3.1: zlibSearch maps all params to POST form; arrays stay arrays ─────────
+{
+	const fx = await startFakeEapi();
+	try {
+		await temporaryEnv(
+			{ ZLIB_EMAIL: FAKE_EMAIL, ZLIB_PASSWORD: FAKE_PASSWORD, ZLIB_DOMAIN: fx.base },
+			async () => {
+				const { result, lines } = await captureConsole(async () => {
+					const res = await zlibSearch({
+						query: 'domain driven design',
+						page: 2,
+						limit: 25,
+						yearFrom: 2018,
+						yearTo: 2024,
+						languages: ['en', 'zh'],
+						extensions: ['pdf', 'epub'],
+						order: 'date',
+					});
+					assert.equal(res.ok, true, 'search: ok true');
+					assert.equal(res.status, STATUS_OK, 'search: status ok');
+					assert.equal(res.data.success, 1, 'search: envelope returned as data');
+					assert.deepEqual(res.data.books, [{ id: '1', hash: 'abc', title: 'Fake Book' }], 'search: books forwarded');
+					assert.match(res.message, /搜索|找到|结果/, 'search: Chinese message');
+					return res;
+				});
+				assertNoCredentialLeak(lines);
+				assertNoCredentialsIn(result);
+
+				const call = fx.state.requests.find((r) => r.url === '/eapi/book/search');
+				assert.ok(call, 'search: request sent');
+				assert.equal(call.method, 'POST', 'search: uses POST');
+				const p = new URLSearchParams(call.body);
+				assert.equal(p.get('message'), 'domain driven design', 'search: query -> message');
+				assert.equal(p.get('page'), '2', 'search: page form param');
+				assert.equal(p.get('limit'), '25', 'search: limit form param');
+				assert.equal(p.get('yearFrom'), '2018', 'search: yearFrom form param');
+				assert.equal(p.get('yearTo'), '2024', 'search: yearTo form param');
+				assert.deepEqual(p.getAll('languages[]'), ['en', 'zh'], 'search: languages -> languages[] array');
+				assert.deepEqual(p.getAll('extensions[]'), ['pdf', 'epub'], 'search: extensions -> extensions[] array');
+				assert.equal(p.get('order'), 'date', 'search: order form param');
+				assert.equal(call.headers['content-type'], 'application/x-www-form-urlencoded; charset=UTF-8', 'search: form content-type');
+			}
+		);
+	} finally {
+		await fx.close();
+	}
+}
+
+// ── T3.2: zlibGetBook maps id/hash to GET /eapi/book/{id}/{hash} ──────────────
+{
+	const fx = await startFakeEapi();
+	try {
+		await temporaryEnv(
+			{ ZLIB_EMAIL: FAKE_EMAIL, ZLIB_PASSWORD: FAKE_PASSWORD, ZLIB_DOMAIN: fx.base },
+			async () => {
+				const { result, lines } = await captureConsole(async () => {
+					const res = await zlibGetBook({ id: '12345', hash: 'deadbeef' });
+					assert.equal(res.ok, true, 'getBook: ok true');
+					assert.equal(res.status, STATUS_OK, 'getBook: status ok');
+					assert.deepEqual(res.data.book, { id: '12345', hash: 'deadbeef', title: 'Fake Book' }, 'getBook: book data forwarded');
+					assert.match(res.message, /书籍|详情|获取/, 'getBook: Chinese message');
+					return res;
+				});
+				assertNoCredentialLeak(lines);
+				assertNoCredentialsIn(result);
+
+				const call = fx.state.requests.find((r) => r.url === '/eapi/book/12345/deadbeef');
+				assert.ok(call, 'getBook: correct path /eapi/book/{id}/{hash}');
+				assert.equal(call.method, 'GET', 'getBook: uses GET');
+			}
+		);
+	} finally {
+		await fx.close();
+	}
+}
+
+// ── T3.3: zlibProfile maps to GET /eapi/user/profile ──────────────────────────
+{
+	const fx = await startFakeEapi();
+	try {
+		await temporaryEnv(
+			{ ZLIB_EMAIL: FAKE_EMAIL, ZLIB_PASSWORD: FAKE_PASSWORD, ZLIB_DOMAIN: fx.base },
+			async () => {
+				const { result, lines } = await captureConsole(async () => {
+					const res = await zlibProfile();
+					assert.equal(res.ok, true, 'profile: ok true');
+					assert.equal(res.status, STATUS_OK, 'profile: status ok');
+					assert.deepEqual(res.data.quota, FAKE_QUOTA, 'profile: quota data forwarded');
+					assert.match(res.message, /配额|账户|资料|成功/, 'profile: Chinese message');
+					return res;
+				});
+				assertNoCredentialLeak(lines);
+				assertNoCredentialsIn(result);
+
+				const call = fx.state.requests.find((r) => r.url === '/eapi/user/profile');
+				assert.ok(call, 'profile: request sent');
+				assert.equal(call.method, 'GET', 'profile: uses GET');
+			}
+		);
+	} finally {
+		await fx.close();
+	}
+}
+
+// ── T3.4: zlibSaved maps page -> GET /eapi/user/book/saved?page= ──────────────
+{
+	const fx = await startFakeEapi();
+	try {
+		await temporaryEnv(
+			{ ZLIB_EMAIL: FAKE_EMAIL, ZLIB_PASSWORD: FAKE_PASSWORD, ZLIB_DOMAIN: fx.base },
+			async () => {
+				const { result, lines } = await captureConsole(async () => {
+					const res = await zlibSaved({ page: 3 });
+					assert.equal(res.ok, true, 'saved: ok true');
+					assert.equal(res.status, STATUS_OK, 'saved: status ok');
+					assert.deepEqual(res.data.books, [{ id: '42', title: 'Saved One' }], 'saved: books data forwarded');
+					assert.match(res.message, /收藏|成功/, 'saved: Chinese message');
+					return res;
+				});
+				assertNoCredentialLeak(lines);
+				assertNoCredentialsIn(result);
+
+				const call = fx.state.requests.find((r) => r.url.startsWith('/eapi/user/book/saved?'));
+				assert.ok(call, 'saved: request sent');
+				assert.equal(call.method, 'GET', 'saved: uses GET');
+				assert.equal(new URL(call.url, 'http://x').searchParams.get('page'), '3', 'saved: page query param');
+			}
+		);
+	} finally {
+		await fx.close();
+	}
+}
+
+// ── T3.5: zlibHistory maps page -> GET /eapi/user/book/downloaded?page= ───────
+{
+	const fx = await startFakeEapi();
+	try {
+		await temporaryEnv(
+			{ ZLIB_EMAIL: FAKE_EMAIL, ZLIB_PASSWORD: FAKE_PASSWORD, ZLIB_DOMAIN: fx.base },
+			async () => {
+				const { result, lines } = await captureConsole(async () => {
+					const res = await zlibHistory({ page: 4 });
+					assert.equal(res.ok, true, 'history: ok true');
+					assert.equal(res.status, STATUS_OK, 'history: status ok');
+					assert.deepEqual(res.data.books, [{ id: '43', title: 'Downloaded One' }], 'history: books data forwarded');
+					assert.match(res.message, /历史|下载|成功/, 'history: Chinese message');
+					return res;
+				});
+				assertNoCredentialLeak(lines);
+				assertNoCredentialsIn(result);
+
+				const call = fx.state.requests.find((r) => r.url.startsWith('/eapi/user/book/downloaded?'));
+				assert.ok(call, 'history: request sent');
+				assert.equal(call.method, 'GET', 'history: uses GET');
+				assert.equal(new URL(call.url, 'http://x').searchParams.get('page'), '4', 'history: page query param');
+			}
+		);
+	} finally {
+		await fx.close();
+	}
+}
+
+// ── T3.6: zlibDeleteHistory maps id -> GET /eapi/user/book/{id}/delete, mutates state ──
+{
+	const fx = await startFakeEapi();
+	try {
+		await temporaryEnv(
+			{ ZLIB_EMAIL: FAKE_EMAIL, ZLIB_PASSWORD: FAKE_PASSWORD, ZLIB_DOMAIN: fx.base },
+			async () => {
+				const { result, lines } = await captureConsole(async () => {
+					const res = await zlibDeleteHistory({ id: '777' });
+					assert.equal(res.ok, true, 'deleteHistory: ok true');
+					assert.equal(res.status, STATUS_OK, 'deleteHistory: status ok');
+					assert.equal(res.data.deleted, '777', 'deleteHistory: server echoes deleted id');
+					assert.match(res.message, /删除|成功/, 'deleteHistory: Chinese message');
+					return res;
+				});
+				assertNoCredentialLeak(lines);
+				assertNoCredentialsIn(result);
+
+				const call = fx.state.requests.find((r) => r.url === '/eapi/user/book/777/delete');
+				assert.ok(call, 'deleteHistory: correct path /eapi/user/book/{id}/delete');
+				assert.equal(call.method, 'GET', 'deleteHistory: uses GET');
+				assert.deepEqual(fx.state.deleted, ['777'], 'deleteHistory: fake server state mutated');
+			}
+		);
+	} finally {
+		await fx.close();
+	}
+}
+
+// ── T3.7: zlibCheckDomains: reachability + challenge wall, no credentials ─────
+{
+	const fxOk = await startFakeEapi({ rootMode: 'ok' });
+	const fxChallenge = await startFakeEapi({ rootMode: 'challenge' });
+	try {
+		await temporaryEnv({ ZLIB_DOMAIN: `${fxOk.base},${fxChallenge.base}` }, async () => {
+			const { result, lines } = await captureConsole(async () => {
+				const res = await zlibCheckDomains();
+				assert.equal(res.ok, true, 'checkDomains: ok true when a clean domain responds');
+				assert.equal(res.status, STATUS_OK, 'checkDomains: status ok');
+				assert.ok(Array.isArray(res.data.domains), 'checkDomains: per-domain results array');
+				assert.equal(res.data.domains.length, 2, 'checkDomains: both domains probed');
+				const okEntry = res.data.domains.find((d) => d.domain === fxOk.base);
+				const chEntry = res.data.domains.find((d) => d.domain === fxChallenge.base);
+				assert.equal(okEntry.reachable, true, 'checkDomains: healthy domain reachable');
+				assert.equal(okEntry.challenge, false, 'checkDomains: healthy domain no challenge');
+				assert.equal(chEntry.reachable, true, 'checkDomains: challenge domain still reachable');
+				assert.equal(chEntry.challenge, true, 'checkDomains: challenge wall detected via isChallenge');
+				assert.match(res.message, /域名|可达/, 'checkDomains: Chinese message');
+				return res;
+			});
+			assertNoCredentialLeak(lines);
+			assertNoCredentialsIn(result);
+			assert.equal(fxOk.state.logins, 0, 'checkDomains: no password login');
+			assert.equal(fxChallenge.state.logins, 0, 'checkDomains: no password login on any domain');
+			assert.ok(
+				fxOk.state.requests.every((r) => r.url === '/'),
+				'checkDomains: probe only hits root path (lightweight, no EAPI)'
+			);
+		});
+	} finally {
+		await fxOk.close();
+		await fxChallenge.close();
+	}
+}
+
+// ── T3.8: zlibCheckDomains reports unreachable domains; no creds required ────
+{
+	await temporaryEnv({ ZLIB_DOMAIN: 'http://127.0.0.1:1' }, async () => {
+		const { result, lines } = await captureConsole(async () => {
+			const res = await zlibCheckDomains();
+			assert.equal(res.ok, false, 'checkDomains: ok false when no domain reachable');
+			assert.equal(res.status, STATUS_DOMAIN_UNREACHABLE, 'checkDomains: domain_unreachable');
+			assert.equal(res.data.domains[0].reachable, false, 'checkDomains: unreachable flagged per domain');
+			assert.equal(res.data.domains[0].challenge, false, 'checkDomains: unreachable has no challenge flag');
+			assert.match(res.message, /域名|不可达|失败/, 'checkDomains: Chinese failure message');
+			return res;
+		});
+		assertNoCredentialLeak(lines);
+		assertNoCredentialsIn(result);
+	});
+}
+
+// ── T3.9: uniform return shape on classified error (session_expired) ─────────
+{
+	const fx = await startFakeEapi({ expired: true });
+	try {
+		await temporaryEnv(
+			{ ZLIB_EMAIL: FAKE_EMAIL, ZLIB_PASSWORD: FAKE_PASSWORD, ZLIB_DOMAIN: fx.base },
+			async () => {
+				const { result, lines } = await captureConsole(async () => {
+					const res = await zlibProfile();
+					assert.equal(res.ok, false, 'expired profile: ok false');
+					assert.equal(res.status, STATUS_SESSION_EXPIRED, 'expired profile: session_expired, not thrown');
+					assert.equal(res.data, null, 'expired profile: data null');
+					assert.match(res.message, /登录态|失效/, 'expired profile: Chinese guidance');
+					for (const key of ['ok', 'status', 'data', 'message']) {
+						assert.ok(Object.hasOwn(res, key), `uniform return has key ${key}`);
+					}
+					return res;
+				});
+				assertNoCredentialLeak(lines);
+				assertNoCredentialsIn(result);
+			}
+		);
+	} finally {
+		await fx.close();
+	}
+}
 
 console.log('test-zlib: ALL PASS');
