@@ -174,6 +174,8 @@ LibGen 与 Sci-Hub 的用法不同：Sci-Hub 是「已知 DOI → 直接拿 PDF�
 
 可编辑字段约十个：`title`、`authors`、`publisher`、`language`、`tags`、`series`、`index`、`isbn`、`date`、`description`。`rename` 控制是否按新 `title` 同步重命名文件。
 
+书目元数据查源来自 Open Library 与 Google Books（按其公开 API 与服务条款使用），致谢这两个开放书目服务。
+
 支持范围与安全性：
 
 - **仅支持 EPUB 与 PDF** 两种格式；其它格式直接拒绝。

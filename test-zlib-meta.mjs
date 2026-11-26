@@ -97,7 +97,28 @@ async function runSuite() {
     assert.ok(readFileSync(movedPath).equals(beforeBound),
       'a path-bound refusal must not modify the moved file');
 
-    // 5) metaRead STATUS mapping (all read-time MetaError codes).
+    // 5) content integrity: a file modified in place after preview is refused,
+    //    its token burned, and the externally-modified bytes left untouched.
+    const changedPath = buildEpubFixture(join(dir, 'changed.epub'), {
+      title: 'Change Me',
+      authors: ['Fixture Author'],
+      language: 'en',
+    });
+    const changedPreview = await metaPreview(changedPath, { title: 'Stale Title' });
+    assert.equal(changedPreview.ok, true, `preview failed: ${changedPreview.message}`);
+    // External modification: append one byte after preview, bypassing every
+    // plugin writer. A stale commit must not overwrite these bytes.
+    const externalBytes = Buffer.concat([readFileSync(changedPath), Buffer.from([0x0a])]);
+    writeFileSync(changedPath, externalBytes);
+    const changed = await metaCommit(changedPreview.token);
+    assert.equal(changed.ok, false, 'commit must refuse a file changed since preview');
+    assert.equal(changed.status, STATUS_TOKEN_EXPIRED);
+    assert.equal(__tokens.has(changedPreview.token), false,
+      'a changed-file token must be burned so a fresh preview is forced');
+    assert.ok(readFileSync(changedPath).equals(externalBytes),
+      'a refused commit must leave the externally-modified bytes exactly as they are');
+
+    // 6) metaRead STATUS mapping (all read-time MetaError codes).
     const textPath = join(dir, 'notes.txt');
     writeFileSync(textPath, 'not a book');
     const unsupported = await metaRead(textPath);
@@ -118,7 +139,7 @@ async function runSuite() {
     assert.equal(good.status, 'ok');
     assert.equal(good.fields.title, 'T2');
 
-    // 6) zero-credential static check: no credential envs in module source.
+    // 7) zero-credential static check: no credential envs in module source.
     const sourcePath = fileURLToPath(new URL('./lib/zlib-meta.mjs', import.meta.url));
     const source = readFileSync(sourcePath, 'utf8');
     assert.doesNotMatch(source, /ZLIB_EMAIL|ZLIB_PASSWORD|ZLIB_COOKIE|process\.env/,
