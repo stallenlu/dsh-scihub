@@ -1040,4 +1040,54 @@ assert.equal(STATUS_QUOTA_EXHAUSTED, 'quota_exhausted');
 	}
 }
 
+// ═════════════════════════ T6: docs / attribution / version / packaging ═══════
+// Appended after the T2/T3/T4/T5 blocks above; nothing earlier is rewritten.
+{
+	const readText = (p) => readFile(new URL(p, import.meta.url), 'utf8');
+	const readme = await readText('./README.md');
+	const en = JSON.parse(await readText('./locale/en.json'));
+	const zh = JSON.parse(await readText('./locale/zh.json'));
+	const pkg = JSON.parse(await readText('./package.json'));
+
+	// T6.1 — five mandatory attribution/disclaimer elements, verbatim.
+	for (const needle of ['heartleo/zlib', 'MIT', '非官方', '版权', '免责']) {
+		assert.ok(readme.includes(needle), `README must contain attribution element: ${needle}`);
+	}
+	assert.ok(readme.includes('https://github.com/heartleo/zlib'), 'README links the upstream project');
+
+	// T6.2 — bilingual locale descriptions cover the zlib tools (names only).
+	for (const [lang, loc] of [['en', en], ['zh', zh]]) {
+		assert.ok(loc.meta && typeof loc.meta.description === 'string', `${lang}.meta.description exists`);
+		assert.ok(loc.meta.description.includes('zlib_status'), `${lang}.meta.description lists zlib_status`);
+		assert.match(loc.meta.title, /Z-Library/, `${lang}.meta.title mentions Z-Library`);
+	}
+
+	// T6.3 — packaging manifest: 0.6.0, both new tests, lib/, keyword, description.
+	assert.equal(pkg.version, '0.6.0', 'package.json version is 0.6.0');
+	for (const path of ['test-zlib.mjs', 'test-http-methods.mjs', 'lib']) {
+		assert.ok(Array.isArray(pkg.files) && pkg.files.includes(path), `package.json files includes ${path}`);
+	}
+	assert.ok(pkg.keywords.includes('zlib'), 'package.json keywords includes zlib');
+	assert.match(pkg.description, /Z-Library/, 'package.json description mentions Z-Library');
+
+	// T6.4 — README self-test list includes the two new suites.
+	for (const cmd of ['node test-http-methods.mjs', 'node test-zlib.mjs']) {
+		assert.ok(readme.includes(cmd), `README self-test lists ${cmd}`);
+	}
+
+	// T6.5 — README documents env variable NAMES and all nine tools + failure states.
+	for (const name of ['ZLIB_EMAIL', 'ZLIB_PASSWORD', 'ZLIB_COOKIE', 'ZLIB_DOMAIN']) {
+		assert.ok(readme.includes(name), `README documents env var name ${name}`);
+	}
+	for (const tool of [
+		'zlib_status', 'zlib_search', 'zlib_get_book', 'zlib_download', 'zlib_profile',
+		'zlib_saved', 'zlib_history', 'zlib_check_domains', 'zlib_delete_history',
+	]) {
+		assert.ok(readme.includes(tool), `README documents tool ${tool}`);
+	}
+	for (const status of ['not_configured', 'session_expired', 'domain_unreachable', 'quota_exhausted']) {
+		assert.ok(readme.includes(status), `README documents failure status ${status}`);
+	}
+}
+
 console.log('test-zlib: ALL PASS');

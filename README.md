@@ -1,8 +1,16 @@
 # dsh-scihub
 
-DeepSeek Harness 插件：`scihub_pdf` / `scihub_batch` 按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF；`libgen_search` / `libgen_download` 用关键词检索 Library Genesis 并按 MD5 下载书籍或文献。文件保存到当前会话工作区，并按引用/命中元数据起人类可读的统一名字。
+DeepSeek Harness 插件：`scihub_pdf` / `scihub_batch` 按 **DOI 或 URL** 从 Sci-Hub 镜像抓取论文 PDF；`libgen_search` / `libgen_download` 用关键词检索 Library Genesis 并按 MD5 下载书籍或文献；0.6.0 起新增九个 `zlib_*` 工具，用账号会话从 Z-Library 搜索、查看详情、下载电子书，以及查看收藏、历史、配额与域名诊断。文件保存到当前会话工作区，并按引用/命中元数据起人类可读的统一名字。
 
-> Sci-Hub 与 Library Genesis 都是影子图书馆，其可用性与合法性因司法辖区而异。插件只如实报告它实际拿到了什么，不会把失败包装成成功。
+> Sci-Hub 与 Library Genesis 都是影子图书馆，其可用性与合法性因司法辖区而异。Z-Library 属于账号制资源库，请自行确认当地法规与平台条款。插件只如实报告它实际拿到了什么，不会把失败包装成成功。
+
+## 致谢与法律声明
+
+> 本插件对 Z-Library EAPI 协议的原生实现，参考了开源项目 **heartleo/zlib**（**MIT** 许可，https://github.com/heartleo/zlib ），在此谨致谢意。
+
+- **非官方声明（UNOFFICIAL）**：本插件是独立、非官方的实现，**并非隶属于、关联于或获得 Z-Library 与 heartleo/zlib 的认可或背书**（not affiliated with or endorsed by Z-Library or heartleo/zlib）。
+- **版权归属**：版权归各自所有者所有；原项目 heartleo/zlib 的版权归其原作者所有。本插件只参考其公开协议设计与文档，不复制其代码。
+- **免责声明**：用户须自行判断并承担使用本插件的全部风险与合规责任；作者对任何使用后果不承担任何责任。
 
 ## 分发与收录
 
@@ -10,15 +18,15 @@ DeepSeek Harness 插件：`scihub_pdf` / `scihub_batch` 按 **DOI 或 URL** 从 
 
 | 渠道 | 状态 / 地址 |
 |---|---|
-| **npm 包** | `dsh-scihub@0.5.3` 已发布 → https://www.npmjs.com/package/dsh-scihub |
-| **GitHub Release 预构建包** | `v0.5.3` 已附 `dsh-scihub-0.5.3.tgz` → https://github.com/stallenlu/dsh-scihub/releases/tag/v0.5.3 |
+| **npm 包** | `dsh-scihub@0.6.0` → https://www.npmjs.com/package/dsh-scihub |
+| **GitHub Release 预构建包** | `v0.6.0` 附 `dsh-scihub-0.6.0.tgz` → https://github.com/stallenlu/dsh-scihub/releases/tag/v0.6.0 |
 | **dshmarket 插件市场** | 已收录进官方目录（收录 PR [#12966](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/12966) 已合并），在 Plugins → Plugin Market 搜索 `dsh-scihub` 即可一键安装 |
 
 目录会优先使用已发布的 npm 包，其次作者提供的 Release 预构建 tarball，最后回退到整仓 GitHub 源码。仓库已加 `dsh-plugin` topic，`package.json` 声明 `dsh.bundle` 且 `repository` 指回本仓库，根目录 `cordis.patch.yml` 含 `- insert:` —— 这些是目录投稿的硬性要求。
 
 ## 提供的能力
 
-注册五个模型工具（三个 Sci-Hub、两个 LibGen），外加三处横切能力。按版本累计如下，后面各节展开说明：
+注册十四个模型工具（三个 Sci-Hub、两个 LibGen、九个 Z-Library），外加多处横切能力。按版本累计如下，后面各节展开说明：
 
 | 能力 | 工具 / 机制 | 首见于 |
 |---|---|---|
@@ -28,6 +36,7 @@ DeepSeek Harness 插件：`scihub_pdf` / `scihub_batch` 按 **DOI 或 URL** 从 
 | HTTP/HTTPS CONNECT 代理 | `config.proxy` / 环境变量 / `NO_PROXY` | 0.5.1 |
 | 有界并发批量 / 死镜像跳过 / 截断与验证墙拒绝 | 批量 worker + `truncationReason()` + `isChallenge()` | 0.5.2 |
 | 镜像自愈（重测候选、踢死换活、写回即生效） | `scihub_refresh_mirrors` | 0.5.3 |
+| Z-Library 搜索 / 详情 / 下载 / 收藏 / 历史 / 配额 / 域名诊断 | 九个 `zlib_*` 工具 | 0.6.0 |
 
 ### `scihub_pdf` — 单篇
 
@@ -102,6 +111,56 @@ LibGen 与 Sci-Hub 的用法不同：Sci-Hub 是「已知 DOI → 直接拿 PDF�
 | `error` | 网络 / HTTP / 拿回来的不是文件，`attempts` 里写原因 |
 
 > LibGen 的镜像存活同样会波动：运行时真源是 `lib/libgen-mirrors.json`，每次调用重读、改完不需要重启 DSH；也可用 `config.libgenMirrors` 覆盖。优先级：`config.libgenMirrors` > `lib/libgen-mirrors.json` > 内置兜底列表。
+
+## Z-Library：原生 EAPI 集成（0.6.0 起）
+
+九个 `zlib_*` 工具在同一个插件里提供 Z-Library 的登录态自检、搜索、详情、下载、账户、收藏、历史与域名诊断。协议是原生重写的纯 `node:` 实现，零第三方依赖，不调用也不安装官方 `zlib` 二进制。
+
+### 配置：只从环境变量读凭证
+
+凭证**只从进程环境变量读取**，绝不作为工具参数传入，不进入会话记录，也不写盘。请在启动 DSH **之前**设置：
+
+| 环境变量 | 作用 |
+|---|---|
+| `ZLIB_EMAIL` + `ZLIB_PASSWORD` | 账号密码登录（与 `ZLIB_COOKIE` 同时设置时**优先**） |
+| `ZLIB_COOKIE` | 已登录的内联 cookie 串，格式为 `remix_userid=...; remix_userkey=...`（不接受 cookie 文件路径） |
+| `ZLIB_DOMAIN` | Z-Library 域名；多个域名用逗号分隔，供 `zlib_check_domains` 探测 |
+
+这里只列变量名，不含任何示例值或凭据。账号一旦登录，会话只保留在内存中（惰性登录，不落盘 cookie）。
+
+### 九个工具
+
+| 工具 | 作用 |
+|---|---|
+| `zlib_status` | 查询登录状态与今日配额概要（零凭证参数） |
+| `zlib_search` | 按关键词 / 作者 / ISBN / DOI 搜索图书，支持页码、每页条数、年份、语言、格式与排序 |
+| `zlib_get_book` | 按搜索结果里的 `id` + `hash` 取图书详情 |
+| `zlib_download` | 按 `id` + `hash` 下载图书，保存到 `<工作区>/zlib/` |
+| `zlib_profile` | 查看账户信息与下载配额 |
+| `zlib_saved` | 查看收藏列表（分页） |
+| `zlib_history` | 查看下载历史（分页） |
+| `zlib_check_domains` | 探测候选域名可达性（无需凭证） |
+| `zlib_delete_history` | 按记录 `id` 从下载历史删除一条记录 |
+
+### 三步下载流程
+
+1. `zlib_search` → 从命中里拿到 `id` 与 `hash`。
+2. `zlib_get_book` → 用 `id` / `hash` 取详情（书名、作者、年份，用于命名）。
+3. `zlib_download` → 用 `id` / `hash`（可选带上书名 / 作者 / 年份）下载：先解析真实文件链接，再向 CDN 请求时**剥掉全部 remix 凭证头与 cookie**、带 `Referer`，校验文件魔数与截断，按 `fileNameTemplate` 起人类可读名，原子写、同名不覆盖，保存到 `<工作区>/zlib/`。
+
+### 返回的 `status`
+
+| status | 含义与处置 |
+|---|---|
+| `not_configured` | 未配置必要环境变量：启动 DSH 前设置 `ZLIB_EMAIL`/`ZLIB_PASSWORD` 或 `ZLIB_COOKIE`，以及 `ZLIB_DOMAIN` |
+| `session_expired` | 登录态失效：重新登录并更新 cookie 或账号环境变量后重试 |
+| `domain_unreachable` | 域名不可达：检查 `ZLIB_DOMAIN` 或用 `zlib_check_domains` 换个可用域名 |
+| `quota_exhausted` | 今日下载配额用尽：等配额重置或升级账户 |
+| `not_found` | 镜像 / 服务端没有这本书（与「未登录」机器可区分） |
+| `challenge` | 遇到人机验证墙：纯 HTTP 客户端过不去，无法确认书是否存在 |
+| `error` | 网络 / HTTP / 内容错误，`message` 里给出原因 |
+
+> 下载前会用账户配额概要做检查；配额未知时不当作耗尽处理。
 
 ## 文件名：人类可读的统一命名
 
@@ -226,7 +285,7 @@ Sci-Hub 镜像会随网络/辖区频繁失效、或被 Cloudflare 验证墙拦�
 dsh plugin --profile web add dsh-scihub
 
 # GitHub Release 预构建 tarball
-dsh plugin --profile web add https://github.com/stallenlu/dsh-scihub/releases/download/v0.5.3/dsh-scihub-0.5.3.tgz
+dsh plugin --profile web add https://github.com/stallenlu/dsh-scihub/releases/download/v0.6.0/dsh-scihub-0.6.0.tgz
 
 # 整仓源码
 dsh plugin --profile web add github:stallenlu/dsh-scihub
@@ -239,10 +298,10 @@ dsh plugin --profile web add github:stallenlu/dsh-scihub
 在 DSH 会话里也可以直接用 `plugin_manager` 把官方 npm 版本装进当前 profile：
 
 ```bash
-plugin_manager install_bundle target=dsh-scihub@0.5.3
+plugin_manager install_bundle target=dsh-scihub@0.6.0
 ```
 
-把 `0.5.3` 换成想安装的版本号即可。这与 `dsh plugin --profile <profile> add dsh-scihub` 等价，来源是 npm registry 上已发布的正式包，不依赖任何本地目录。npm 包自带 `cordis.patch.yml`（含 `- insert:` 行），安装后会自动注入 profile 的层栈，**无需**手工在 profile 的 `cordis.patch.yml` 里添加 `- insert:` 块。
+把 `0.6.0` 换成想安装的版本号即可。这与 `dsh plugin --profile <profile> add dsh-scihub` 等价，来源是 npm registry 上已发布的正式包，不依赖任何本地目录。npm 包自带 `cordis.patch.yml`（含 `- insert:` 行），安装后会自动注入 profile 的层栈，**无需**手工在 profile 的 `cordis.patch.yml` 里添加 `- insert:` 块。
 
 > 不要用 `link:<本地目录>` 或 `target=<本目录绝对路径>` 之类的本地源码装法：本地目录一旦被移动或删除，DSH 重启后会报「包不可用 / `dsh: cannot resolve profile bundle "dsh-scihub"`」。指定官方版本号 `dsh-scihub@<version>` 才能一劳永逸。
 
@@ -272,11 +331,13 @@ node test-libgen.mjs                         # 离线：LibGen 解析 / 检索 /
 node test-proxy.mjs                          # 离线：代理解析 / CONNECT 隧道 / 重定向 / 信号不泄漏
 node test-optimizations.mjs                  # 离线：并发保序 / 死镜像跳过 / 截断与验证墙识别
 node test-refresh.mjs                        # 离线：镜像重测写回 / 全死保留旧表 / 自愈工具注册
+node test-http-methods.mjs                   # 离线：httpGet 方法扩展 / 自定义头与 body / 响应头回传
+node test-zlib.mjs                           # 离线：Z-Library EAPI 登录/搜索/下载/工具注册/文档致谢
 node test-smoke.mjs                          # 默认 10.1038/nature12373（需联网）
 node test-smoke.mjs 10.1103/PhysRevLett.116.061102
 ```
 
-`test-naming.mjs` 完全离线，只测引用元数据解析、命名模板、文件名清洗与旧名回退，适合 CI。`test-integration.mjs` 用本地假 Sci-Hub 镜像离线覆盖工具注册、命名各分支、并发原子写与 AbortSignal 不泄漏；`test-libgen.mjs` 用本地假 LibGen 镜像离线覆盖结果表解析、检索状态、按 MD5 下载、扩展名保真、Referer、HTML/截断拒绝与去重；`test-proxy.mjs` 用本地假 CONNECT 代理离线覆盖 `resolveProxyUrl` 优先级、`NO_PROXY` 豁免、隧道内 GET / Referer / UA、重定向二次建隧道、代理拒绝、`config.proxy` 接线与 AbortSignal 不累积。`test-optimizations.mjs` 用可编程的本地假镜像离线覆盖批量有界并发且保序、死镜像按 worker 数去重、通用 Cloudflare 文案判 `challenge`，并直接单测 `truncationReason()`。`test-refresh.mjs` 用本地假镜像离线覆盖镜像自愈：候选探测后只写回实测能下到 PDF 的镜像（按速度排序）、全死时保留旧表不改文件，以及 `scihub_refresh_mirrors` 工具注册与人类可读输出。`test-smoke.mjs` 是一条需要联网的最小端到端检查，覆盖五种输入、五种非法输入，以及批量模式：
+`test-naming.mjs` 完全离线，只测引用元数据解析、命名模板、文件名清洗与旧名回退，适合 CI。`test-integration.mjs` 用本地假 Sci-Hub 镜像离线覆盖工具注册、命名各分支、并发原子写与 AbortSignal 不泄漏；`test-libgen.mjs` 用本地假 LibGen 镜像离线覆盖结果表解析、检索状态、按 MD5 下载、扩展名保真、Referer、HTML/截断拒绝与去重；`test-proxy.mjs` 用本地假 CONNECT 代理离线覆盖 `resolveProxyUrl` 优先级、`NO_PROXY` 豁免、隧道内 GET / Referer / UA、重定向二次建隧道、代理拒绝、`config.proxy` 接线与 AbortSignal 不累积。`test-optimizations.mjs` 用可编程的本地假镜像离线覆盖批量有界并发且保序、死镜像按 worker 数去重、通用 Cloudflare 文案判 `challenge`，并直接单测 `truncationReason()`。`test-refresh.mjs` 用本地假镜像离线覆盖镜像自愈：候选探测后只写回实测能下到 PDF 的镜像（按速度排序）、全死时保留旧表不改文件，以及 `scihub_refresh_mirrors` 工具注册与人类可读输出。`test-http-methods.mjs` 离线覆盖 `httpGet` 的方法 / 自定义头 / body / 响应头扩展（保持旧签名向后兼容）；`test-zlib.mjs` 离线覆盖 Z-Library 的登录与失效、搜索/详情/配额/收藏/历史、下载剥凭证头与命名落盘、九个工具注册与零凭证字段，以及 README/locale/manifest 的致谢与版本断言。`test-smoke.mjs` 是一条需要联网的最小端到端检查，覆盖五种输入、五种非法输入，以及批量模式：
 
 - `doi`（doi.org 链接，须归一化成裸 DOI）
 - `url` 自带 DOI
